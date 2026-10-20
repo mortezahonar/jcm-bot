@@ -11,6 +11,10 @@ on:
         description: "Read updates with getUpdates (only when no webhook is set)"
         type: boolean
         default: false
+      test_key:
+        description: "Only check that the Gemini key works (no bot run)"
+        type: boolean
+        default: false
 
   # Safety net: makes sure the webhook is still registered.
   schedule:
@@ -38,6 +42,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Gemini key check
+        if: github.event_name == 'workflow_dispatch' && inputs.test_key
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          code=$(curl -sS -o /tmp/gem.json -w "%{http_code}" --max-time 60 \
+            -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=$GEMINI_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"contents":[{"parts":[{"text":"reply with OK only"}]}],"generationConfig":{"maxOutputTokens":20}}')
+          echo "HTTP $code"
+          head -c 500 /tmp/gem.json
+          echo
+          test "$code" = "200"
 
       - name: Fetch the pending update
         if: github.event_name == 'repository_dispatch'
