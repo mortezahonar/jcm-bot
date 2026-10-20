@@ -101,6 +101,8 @@ jobs:
         run: |
           git config user.name "jcm-bot"
           git config user.email "jcm-bot@users.noreply.github.com"
+          # The first run may have no state/ yet; git add fails without it.
+          mkdir -p state
           git add -A state
           if git diff --cached --quiet; then
             echo "state unchanged"
