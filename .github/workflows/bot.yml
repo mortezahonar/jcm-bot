@@ -1,0 +1,92 @@
+name: jcm-bot
+
+on:
+  # Telegram -> Cloudflare Worker -> here. Each update is processed on arrival.
+  repository_dispatch:
+    types: [telegram]
+
+  workflow_dispatch:
+    inputs:
+      poll:
+        description: "Read updates with getUpdates (only when no webhook is set)"
+        type: boolean
+        default: false
+
+  # Safety net: makes sure the webhook is still registered.
+  schedule:
+    - cron: '17 * * * *'
+
+concurrency:
+  group: jcm-bot
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      PR_BOT_TOKEN: ${{ secrets.PR_BOT_TOKEN }}
+      PR_CHAT_ID: ${{ secrets.PR_CHAT_ID }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      FALLBACK_API_KEY: ${{ secrets.FALLBACK_API_KEY }}
+      PR_GLOSSARY: ${{ github.workspace }}/data/joomla-translation-glossary.md
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch the pending update
+        if: github.event_name == 'repository_dispatch'
+        env:
+          HOOK_URL: ${{ secrets.PR_HOOK_URL }}
+          HOOK_SECRET: ${{ secrets.PR_HOOK_SECRET }}
+          KEY: ${{ github.event.client_payload.key }}
+        run: |
+          mkdir -p /tmp/jcm-bot
+          curl -sS --fail --retry 3 --retry-connrefused \
+            -H "X-Bot-Secret: $HOOK_SECRET" \
+            "$HOOK_URL/pending/$KEY" -o /tmp/jcm-bot/update.json
+          test -s /tmp/jcm-bot/update.json
+          echo "fetched $(wc -c < /tmp/jcm-bot/update.json) bytes"
+
+      - name: Process the update
+        if: github.event_name == 'repository_dispatch'
+        run: php bot.php --update-file /tmp/jcm-bot/update.json
+
+      - name: Manual poll
+        if: github.event_name == 'workflow_dispatch' && inputs.poll
+        run: php bot.php --once
+
+      - name: Webhook health check
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          HOOK_URL: ${{ secrets.PR_HOOK_URL }}
+          TELEGRAM_SECRET: ${{ secrets.PR_TELEGRAM_SECRET }}
+        run: |
+          info=$(curl -sS "https://api.telegram.org/bot$PR_BOT_TOKEN/getWebhookInfo")
+          echo "$info"
+          current=$(printf '%s' "$info" | jq -r '.result.url')
+          if [ "$current" != "$HOOK_URL" ]; then
+            echo "webhook is '$current'; re-registering"
+            curl -sS -X POST "https://api.telegram.org/bot$PR_BOT_TOKEN/setWebhook" \
+              -d "url=$HOOK_URL" \
+              -d "secret_token=$TELEGRAM_SECRET" \
+              --data-urlencode 'allowed_updates=["message","callback_query"]'
+          fi
+
+      - name: Persist state
+        if: always()
+        run: |
+          git config user.name "jcm-bot"
+          git config user.email "jcm-bot@users.noreply.github.com"
+          git add -A state
+          if git diff --cached --quiet; then
+            echo "state unchanged"
+            exit 0
+          fi
+          git commit -m "state: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push
