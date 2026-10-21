@@ -212,15 +212,28 @@ function handleUpdate(array $update): void
             return;
         }
 
-        if (preg_match('#^(upd|new):([a-z0-9-]{1,60})$#', $data, $m) === 1) {
-            answerCallback($callbackId, 'در حال پردازش...');
-            $log('menu choice: ' . $m[1] . ' slug=' . $m[2]);
+        if (preg_match('#^(upd|new):([a-f0-9]{32})$#', $data, $m) === 1) {
+            $slug = $store->loadToken($m[2]);
 
-            if ($messageId > 0) {
-                $telegram->editMessageText($chatId, $messageId, Persian::rtl('مقاله: ' . $m[2]), ['inline_keyboard' => []]);
+            if ($slug === null) {
+                answerCallback($callbackId, 'این پرسش دیگر معتبر نیست');
+
+                return;
             }
 
-            runPlan($m[2], $m[1] === 'upd');
+            answerCallback($callbackId, 'در حال پردازش...');
+            $log('menu choice: ' . $m[1] . ' slug=' . $slug);
+
+            if ($messageId > 0) {
+                $telegram->editMessageText(
+                    $chatId,
+                    $messageId,
+                    Persian::rtl('مقاله: ' . $slug),
+                    ['inline_keyboard' => []]
+                );
+            }
+
+            runPlan($slug, $m[1] === 'upd');
 
             return;
         }
@@ -315,9 +328,15 @@ function findLink(string $text): ?string
  */
 function askAbout(string $slug, bool $hasTopic): void
 {
-    global $telegram, $chatId, $log;
+    global $telegram, $store, $chatId, $log;
 
     $log('asking about slug=' . $slug . ' topic=' . ($hasTopic ? 'yes' : 'no'));
+
+    // Telegram rejects callback data longer than 64 bytes and this slug can
+    // be longer than that, so the button carries a token and the slug stays
+    // on disk until the answer arrives.
+    $token = md5($slug);
+    $store->saveToken($token, $slug);
 
     $telegram->sendMessage(
         $chatId,
@@ -331,7 +350,7 @@ function askAbout(string $slug, bool $hasTopic): void
             'inline_keyboard' => [[
                 [
                     'text'          => $hasTopic ? 'بله، آپدیت کن' : 'بله، بساز',
-                    'callback_data' => ($hasTopic ? 'upd:' : 'new:') . $slug,
+                    'callback_data' => ($hasTopic ? 'upd:' : 'new:') . $token,
                 ],
                 ['text' => 'نه', 'callback_data' => 'no'],
             ]],

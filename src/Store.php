@@ -78,6 +78,50 @@ final class Store
     }
 
     /**
+     * A button may carry at most 64 bytes and a slug can be longer than
+     * that, so the button carries a token instead. This keeps the map from
+     * that token back to the slug, for as long as the link itself lives.
+     */
+    public function saveToken(string $token, string $slug): void
+    {
+        $this->writeJson($this->linksDir . '/' . $token . '.tok.json', [
+            'slug' => $slug,
+            'at'   => gmdate('c'),
+        ]);
+    }
+
+    /**
+     * The slug behind a token, or null when the token is malformed or the
+     * question it belonged to has expired.
+     */
+    public function loadToken(string $token): ?string
+    {
+        if (preg_match('#^[a-f0-9]{32}$#', $token) !== 1) {
+            return null;
+        }
+
+        $path = $this->linksDir . '/' . $token . '.tok.json';
+        $data = is_file($path) ? $this->readJson($path) : null;
+
+        if (!is_array($data)) {
+            return null;
+        }
+
+        // A confirmation must not run against a question asked days ago.
+        $at = strtotime((string) ($data['at'] ?? ''));
+
+        if ($at === false || time() - $at > 86400) {
+            unlink($path);
+
+            return null;
+        }
+
+        $slug = (string) ($data['slug'] ?? '');
+
+        return preg_match('#^[a-z0-9-]{1,80}$#', $slug) === 1 ? $slug : null;
+    }
+
+    /**
      * topics/<slug>.json holds a single key: the slug.
      * Returns the inner array or null.
      *
