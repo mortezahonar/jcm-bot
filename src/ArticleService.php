@@ -13,10 +13,18 @@ final class ArticleService
     /** Telegram rejects messages over 4096 characters; leave headroom. */
     private const MAX_MESSAGE = 3500;
 
+    /** Batch adjacent article text into PR-like body units, while keeping input bounded. */
+    private const MAX_TRANSLATION_INPUT = 2500;
+
+    /** @var (\Closure(string, int): array{status: int, body: string})|null */
+    private ?Closure $fetcher = null;
+
     public function __construct(
         private Translator $translator,
-        private Store $store
+        private Store $store,
+        ?callable $fetcher = null
     ) {
+        $this->fetcher = $fetcher !== null ? Closure::fromCallable($fetcher) : null;
     }
 
     /**
@@ -39,7 +47,9 @@ final class ArticleService
             throw new RuntimeException('این لینک، لینک مقالهٔ مجلهٔ جوملا نیست.');
         }
 
-        $res = Http::get($url, 90);
+        $res = $this->fetcher !== null
+            ? ($this->fetcher)($url, 90)
+            : Http::get($url, 90);
 
         if ($res['status'] !== 200) {
             throw new RuntimeException('magazine.joomla.org جواب ' . $res['status'] . ' داد.');
@@ -78,9 +88,11 @@ final class ArticleService
         }
 
         $buffer = '';
+        $translationBuffer = '';
 
         foreach ($article['blocks'] as $block) {
             if ($block['type'] === 'img') {
+                $this->translateBufferedText($actions, $translationBuffer, $buffer);
                 $this->flush($actions, $buffer);
 
                 $caption = $block['alt'] !== '' ? $this->translator->translateTitle($block['alt']) : null;
@@ -95,6 +107,7 @@ final class ArticleService
 
             foreach ($this->segments($block['html']) as $segment) {
                 if ($segment['type'] === 'img') {
+                    $this->translateBufferedText($actions, $translationBuffer, $buffer);
                     $this->flush($actions, $buffer);
 
                     $caption = $segment['alt'] !== '' ? $this->translator->translateTitle($segment['alt']) : null;
@@ -107,20 +120,11 @@ final class ArticleService
                     continue;
                 }
 
-                $translated = $this->translator->translateBody($segment['html']);
-
-                if ($translated === '') {
-                    continue;
-                }
-
-                $buffer .= $translated . "\n\n";
-
-                if (mb_strlen($buffer, 'UTF-8') >= self::MAX_MESSAGE) {
-                    $this->flush($actions, $buffer);
-                }
+                $this->queueTextSegment($actions, $translationBuffer, $buffer, $segment['html']);
             }
         }
 
+        $this->translateBufferedText($actions, $translationBuffer, $buffer);
         $this->flush($actions, $buffer);
 
         if ($article['body_empty']) {
@@ -296,6 +300,69 @@ final class ArticleService
         }
 
         return $out;
+    }
+
+    /**
+     * Queue one DOM-safe text segment, batching adjacent segments like the PR bot batches a comment body.
+     * A single indivisible DOM element may exceed the target; do not split its markup mid-tag.
+     *
+     * @param list<array{kind: string, name?: string, text?: string, url?: string, caption?: ?string}> $actions
+     */
+    private function queueTextSegment(array &$actions, string &$sourceBuffer, string &$messageBuffer, string $html): void
+    {
+        $html = trim($html);
+
+        if ($html === '') {
+            return;
+        }
+
+        $separator = $sourceBuffer === '' ? '' : "\n\n";
+        $candidate = $sourceBuffer . $separator . $html;
+
+        if ($sourceBuffer !== '' && mb_strlen($candidate, 'UTF-8') > self::MAX_TRANSLATION_INPUT) {
+            $this->translateBufferedText($actions, $sourceBuffer, $messageBuffer);
+            $separator = '';
+            $candidate = $html;
+        }
+
+        $sourceBuffer = $candidate;
+
+        if (mb_strlen($sourceBuffer, 'UTF-8') >= self::MAX_TRANSLATION_INPUT) {
+            $this->translateBufferedText($actions, $sourceBuffer, $messageBuffer);
+        }
+    }
+
+    /**
+     * Translate the current article text unit and append it to the Telegram output buffer.
+     *
+     * @param list<array{kind: string, name?: string, text?: string, url?: string, caption?: ?string}> $actions
+     */
+    private function translateBufferedText(array &$actions, string &$sourceBuffer, string &$messageBuffer): void
+    {
+        if (trim($sourceBuffer) === '') {
+            $sourceBuffer = '';
+
+            return;
+        }
+
+        $translated = $this->translator->translateBody($sourceBuffer);
+        $sourceBuffer = '';
+
+        if ($translated === '') {
+            return;
+        }
+
+        $addition = $translated . "\n\n";
+
+        if ($messageBuffer !== '' && mb_strlen($messageBuffer . $addition, 'UTF-8') > self::MAX_MESSAGE) {
+            $this->flush($actions, $messageBuffer);
+        }
+
+        $messageBuffer .= $addition;
+
+        if (mb_strlen($messageBuffer, 'UTF-8') >= self::MAX_MESSAGE) {
+            $this->flush($actions, $messageBuffer);
+        }
     }
 
     /**
