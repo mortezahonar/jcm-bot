@@ -63,7 +63,21 @@ final class Translator
             return '';
         }
 
-        $translated = $this->generator->generate($this->systemPrompt(), $protected);
+        $systemPrompt = $this->systemPrompt();
+        $translated = $this->generator->generate($systemPrompt, $protected);
+
+        if (!$this->hasValidLinkMarkers($protected, $translated)) {
+            $strictPrompt = $systemPrompt . "\n\n"
+                . 'خطای ساختاری: پاسخ قبلی markerهای پیوند را حذف یا جابه‌جا کرد. این متن را از نو ترجمه کن. '
+                . 'تمام markerهای پیوند و URL را عیناً، دقیقاً یک‌بار و به همان ترتیب نگه دار؛ '
+                . 'متن لینک‌شده باید میان markerهای اصلی خودش بماند. هیچ پیوندی را به انتهای متن منتقل نکن.';
+            $translated = $this->generator->generate($strictPrompt, $protected);
+
+            if (!$this->hasValidLinkMarkers($protected, $translated)) {
+                throw new RuntimeException('ساختار پیوندها در ترجمه حفظ نشد؛ برای جلوگیری از جابه‌جایی ارجاع‌ها، آماده‌سازی پیش‌نویس متوقف شد. لطفاً دوباره تلاش کنید.');
+            }
+        }
+
         $restored = $this->restore($translated);
 
         if ($markup) {
@@ -166,7 +180,6 @@ final class Translator
 
     private function restore(string $s): string
     {
-        $s = $this->repairMissingLinkPlaceholders($s);
         $pattern = '#' . self::L . '(\d+)' . self::R . '#u';
 
         return preg_replace_callback($pattern, function (array $m): string {
@@ -363,18 +376,15 @@ final class Translator
         return implode('', $parts);
     }
 
-    private function repairMissingLinkPlaceholders(string $translated): string
+    private function hasValidLinkMarkers(string $protected, string $translated): bool
     {
+        if ($this->linkSensitiveMarkerSequence($protected) !== $this->linkSensitiveMarkerSequence($translated)) {
+            return false;
+        }
+
         $links = [];
-        $bareUrls = [];
 
         foreach ($this->atoms as $atomId => $atom) {
-            if ($atom['type'] === 'url') {
-                $bareUrls[$atomId] = (string) ($atom['data']['url'] ?? '');
-
-                continue;
-            }
-
             $linkId = $atom['data']['link_id'] ?? null;
 
             if (!is_int($linkId)) {
@@ -383,105 +393,75 @@ final class Translator
 
             if ($atom['type'] === 'linkopen') {
                 $links[$linkId]['open'] = $atomId;
-                $links[$linkId]['data'] = $atom['data'];
             } elseif ($atom['type'] === 'linkclose') {
                 $links[$linkId]['close'] = $atomId;
             }
         }
 
-        if ($links === [] && $bareUrls === []) {
-            return $translated;
-        }
-
         ksort($links);
         $lastClosePosition = -1;
-        $valid = true;
         $anchorRanges = [];
 
         foreach ($links as $link) {
             if (!isset($link['open'], $link['close'])) {
-                $valid = false;
-                break;
+                return false;
             }
 
             $openToken = self::L . $link['open'] . self::R;
             $closeToken = self::L . $link['close'] . self::R;
-
-            if (substr_count($translated, $openToken) !== 1 || substr_count($translated, $closeToken) !== 1) {
-                $valid = false;
-                break;
-            }
-
             $openPosition = strpos($translated, $openToken);
             $closePosition = strpos($translated, $closeToken);
 
-            if ($openPosition === false || $closePosition === false || $openPosition <= $lastClosePosition || $closePosition <= $openPosition) {
-                $valid = false;
-                break;
+            if ($openPosition === false || $closePosition === false || $openPosition < $lastClosePosition || $closePosition <= $openPosition) {
+                return false;
             }
 
             $lastClosePosition = $closePosition + strlen($closeToken);
             $anchorRanges[] = [$openPosition, $closePosition];
         }
 
-        $fallbackLinks = [];
-
-        if (!$valid) {
-            $anchorRanges = [];
-
-            foreach ($links as $link) {
-                if (!isset($link['open'], $link['data'])) {
-                    continue;
-                }
-
-                $openToken = self::L . $link['open'] . self::R;
-                $translated = str_replace($openToken, '', $translated);
-
-                if (isset($link['close'])) {
-                    $closeToken = self::L . $link['close'] . self::R;
-                    $translated = str_replace($closeToken, '', $translated);
-                }
-
-                $href = (string) ($link['data']['href'] ?? '');
-                $label = trim((string) ($link['data']['label'] ?? ''));
-
-                if ($href !== '') {
-                    $fallbackLinks[] = '<a href="' . $this->esc($href) . '">' . $this->esc($label === '' ? $href : $label) . '</a>';
-                }
-            }
-        }
-
-        foreach ($bareUrls as $atomId => $url) {
-            $token = self::L . $atomId . self::R;
-            $urlPosition = strpos($translated, $token);
-            $insideAnchor = false;
-
-            if ($urlPosition !== false) {
-                foreach ($anchorRanges as [$openPosition, $closePosition]) {
-                    if ($urlPosition > $openPosition && $urlPosition < $closePosition) {
-                        $insideAnchor = true;
-                        break;
-                    }
-                }
-            }
-
-            if (substr_count($translated, $token) === 1 && !$insideAnchor) {
+        foreach ($this->atoms as $atomId => $atom) {
+            if ($atom['type'] !== 'url') {
                 continue;
             }
 
-            $translated = str_replace($token, '', $translated);
-            if ($url !== '') {
-                $fallbackLinks[] = '<a href="' . $this->esc($url) . '">' . $this->esc($url) . '</a>';
+            $position = strpos($translated, self::L . $atomId . self::R);
+
+            if ($position === false) {
+                return false;
+            }
+
+            foreach ($anchorRanges as [$openPosition, $closePosition]) {
+                if ($position > $openPosition && $position < $closePosition) {
+                    return false;
+                }
             }
         }
 
-        if ($fallbackLinks === []) {
-            return $translated;
+        return true;
+    }
+
+    /** @return list<int> */
+    private function linkSensitiveMarkerSequence(string $text): array
+    {
+        $count = preg_match_all('#' . self::L . '(\d+)' . self::R . '#u', $text, $matches);
+
+        if ($count === false || $count === 0) {
+            return [];
         }
 
-        $separator = trim($translated) === '' ? '' : "\n\n";
+        $sequence = [];
 
-        return rtrim($translated) . $separator . implode("\n", $fallbackLinks);
+        foreach ($matches[1] as $rawId) {
+            $atomId = (int) $rawId;
+            $type = $this->atoms[$atomId]['type'] ?? null;
+
+            if (in_array($type, ['linkopen', 'linkclose', 'url'], true)) {
+                $sequence[] = $atomId;
+            }
+        }
+
+        return $sequence;
     }
 
     private function protectTermOverrides(string $text): string
