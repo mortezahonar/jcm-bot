@@ -21,25 +21,48 @@ final class OpenAiCompatible implements TextGenerator
 
     private const RETRY_DELAY = 3;
 
+    /** Bound one fallback call while leaving headroom for the full plan. */
+    private const MAX_REQUEST_TIMEOUT = 40;
+
+    private const MAX_TRANSPORT_TIMEOUT_RETRIES = 1;
+
+    /** @var (\Closure(string, string, int): array{status: int, json: mixed, raw: string})|null */
+    private ?Closure $requester = null;
+
     public function __construct(
         private string $apiKey,
         private string $baseUrl,
         private string $model,
-        private int $maxTokens = 8192
+        private int $maxTokens = 8192,
+        ?callable $requester = null
     ) {
+        $this->requester = $requester !== null ? Closure::fromCallable($requester) : null;
     }
 
     public function generate(string $system, string $userText, int $timeout = 60): string
     {
         $lastError = null;
+        $transportTimeoutRetries = 0;
 
         for ($attempt = 1; $attempt <= self::MAX_ATTEMPTS; $attempt++) {
             $started = microtime(true);
 
             try {
-                $res = $this->request($system, $userText, $timeout);
+                $res = $this->request($system, $userText, min($timeout, self::MAX_REQUEST_TIMEOUT));
             } catch (Throwable $e) {
                 $lastError = $e;
+
+                if (
+                    stripos($e->getMessage(), 'timed out') !== false
+                    && $transportTimeoutRetries < self::MAX_TRANSPORT_TIMEOUT_RETRIES
+                    && $attempt < self::MAX_ATTEMPTS
+                ) {
+                    $transportTimeoutRetries++;
+                    Log::write('fallback ' . $this->model . ': transport timeout; retrying once');
+                    sleep(1);
+
+                    continue;
+                }
 
                 Log::write(
                     'fallback ' . $this->model . ' attempt ' . $attempt . ': transport failure after '
@@ -125,6 +148,10 @@ final class OpenAiCompatible implements TextGenerator
      */
     private function request(string $system, string $userText, int $timeout): array
     {
+        if ($this->requester !== null) {
+            return ($this->requester)($system, $userText, $timeout);
+        }
+
         $url = rtrim($this->baseUrl, '/') . '/chat/completions';
 
         $payload = [
