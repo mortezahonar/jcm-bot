@@ -22,7 +22,8 @@ final class Translator
     public function __construct(
         private TextGenerator $generator,
         private string $systemPrompt,
-        private string $glossary = ''
+        private string $glossary = '',
+        private array $termOverrides = []
     ) {
     }
 
@@ -132,6 +133,8 @@ final class Translator
             return $this->atom('url', ['url' => rtrim($m[0], '.,;:)')]);
         }, $s) ?? $s;
 
+        $s = $this->protectTermOverrides($s);
+
         // Anything left that looks like a tag cannot be rendered by Telegram:
         // the author was naming it, so escape it and keep it readable instead
         // of letting Telegram reject the whole message.
@@ -177,6 +180,8 @@ final class Translator
                 return '<code>' . $this->esc((string) $data['text']) . '</code>';
             case 'entity':
                 return '<code>' . $this->esc((string) $data['text']) . '</code>';
+            case 'term':
+                return $this->esc((string) $data['text']);
             case 'plain':
                 // A tag Telegram cannot render: show it as text, not as markup.
                 return $this->esc((string) $data['text']);
@@ -240,6 +245,48 @@ final class Translator
         $this->atoms[$id] = ['type' => $type, 'data' => $data];
 
         return self::L . $id . self::R;
+    }
+
+    private function protectTermOverrides(string $text): string
+    {
+        $terms = [];
+
+        foreach ($this->termOverrides as $source => $target) {
+            if (!is_string($source) || !is_string($target) || trim($source) === '' || trim($target) === '') {
+                continue;
+            }
+
+            $terms[mb_strtolower($source, 'UTF-8')] = $target;
+        }
+
+        if ($terms === []) {
+            return $text;
+        }
+
+        $sources = array_keys($terms);
+        usort($sources, static fn (string $a, string $b): int => mb_strlen($b, 'UTF-8') <=> mb_strlen($a, 'UTF-8'));
+        $alternatives = array_map(static fn (string $source): string => preg_quote($source, '#'), $sources);
+        $pattern = '#(?<![\p{L}\p{N}_])(?:' . implode('|', $alternatives) . ')(?![\p{L}\p{N}_])#iu';
+        $parts = preg_split('#(<[^>]*>)#s', $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+
+        if (!is_array($parts)) {
+            return $text;
+        }
+
+        foreach ($parts as &$part) {
+            if ($part === '' || ($part[0] === '<' && str_ends_with($part, '>'))) {
+                continue;
+            }
+
+            $part = preg_replace_callback($pattern, function (array $match) use ($terms): string {
+                $target = $terms[mb_strtolower($match[0], 'UTF-8')] ?? null;
+
+                return is_string($target) ? $this->atom('term', ['text' => $target]) : $match[0];
+            }, $part) ?? $part;
+        }
+        unset($part);
+
+        return implode('', $parts);
     }
 
     private function esc(string $text): string

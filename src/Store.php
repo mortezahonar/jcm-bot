@@ -8,6 +8,7 @@ final class Store
     private string $pendingDir;
     private string $awaitingDir;
     private string $linksDir;
+    private string $termOverridesPath;
 
     public function __construct(private string $dir)
     {
@@ -15,6 +16,7 @@ final class Store
         $this->pendingDir = $dir . '/pending';
         $this->awaitingDir = $dir . '/awaiting';
         $this->linksDir = $dir . '/links';
+        $this->termOverridesPath = $dir . '/term-overrides.json';
 
         foreach ([$dir, $this->topicsDir, $this->pendingDir, $this->awaitingDir, $this->linksDir] as $path) {
             if (!is_dir($path)) {
@@ -255,6 +257,90 @@ final class Store
         if (is_file($path)) {
             unlink($path);
         }
+    }
+
+    /**
+     * @return array<string, string> User-defined source-to-target terminology overrides.
+     */
+    public function loadTermOverrides(): array
+    {
+        if (!is_file($this->termOverridesPath)) {
+            return [];
+        }
+
+        $data = $this->readJson($this->termOverridesPath);
+
+        if (!is_array($data)) {
+            return [];
+        }
+
+        $terms = [];
+
+        foreach ($data as $source => $target) {
+            if (is_string($source) && is_string($target) && self::validTerm($source, $target)) {
+                $terms[$source] = $target;
+            }
+        }
+
+        return $terms;
+    }
+
+    public function saveTermOverride(string $source, string $target): void
+    {
+        $source = trim($source);
+        $target = trim($target);
+
+        if (!self::validTerm($source, $target)) {
+            throw new InvalidArgumentException('اصطلاح یا معادل معتبر نیست.');
+        }
+
+        $terms = $this->loadTermOverrides();
+
+        foreach ($terms as $existing => $_) {
+            if (mb_strtolower($existing, 'UTF-8') === mb_strtolower($source, 'UTF-8')) {
+                unset($terms[$existing]);
+            }
+        }
+
+        if (!isset($terms[$source]) && count($terms) >= 100) {
+            throw new RuntimeException('حداکثر ۱۰۰ اصطلاح اصلاحی قابل ذخیره است.');
+        }
+
+        $terms[$source] = $target;
+        ksort($terms, SORT_NATURAL | SORT_FLAG_CASE);
+        $this->writeJson($this->termOverridesPath, $terms);
+    }
+
+    public function deleteTermOverride(string $source): bool
+    {
+        $source = trim($source);
+
+        if ($source === '') {
+            return false;
+        }
+
+        $terms = $this->loadTermOverrides();
+
+        foreach ($terms as $existing => $_) {
+            if (mb_strtolower($existing, 'UTF-8') === mb_strtolower($source, 'UTF-8')) {
+                unset($terms[$existing]);
+                $this->writeJson($this->termOverridesPath, $terms);
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static function validTerm(string $source, string $target): bool
+    {
+        return $source !== ''
+            && $target !== ''
+            && mb_strlen($source, 'UTF-8') <= 100
+            && mb_strlen($target, 'UTF-8') <= 120
+            && preg_match('/[=\r\n\x00-\x1F]/u', $source) !== 1
+            && preg_match('/[\r\n\x00-\x1F]/u', $target) !== 1;
     }
 
     private function awaitingPath(string $userId): string

@@ -54,7 +54,21 @@ if ((string) $config['glossary_path'] !== '' && is_file((string) $config['glossa
         . (string) file_get_contents((string) $config['glossary_path']);
 }
 
-$translator = new Translator($generator, $systemPrompt, $glossary);
+$defaultTermsPath = __DIR__ . '/data/translation_overrides.json';
+$defaultTerms = is_file($defaultTermsPath)
+    ? json_decode((string) file_get_contents($defaultTermsPath), true)
+    : [];
+$termOverrides = is_array($defaultTerms) ? $defaultTerms : [];
+foreach ($store->loadTermOverrides() as $source => $target) {
+    foreach ($termOverrides as $defaultSource => $_) {
+        if (mb_strtolower((string) $defaultSource, 'UTF-8') === mb_strtolower($source, 'UTF-8')) {
+            unset($termOverrides[$defaultSource]);
+        }
+    }
+
+    $termOverrides[$source] = $target;
+}
+$translator = new Translator($generator, $systemPrompt, $glossary, $termOverrides);
 $magazine = new Magazine();
 $service = new ArticleService($translator, $store, $magazine);
 
@@ -272,6 +286,10 @@ function handleUpdate(array $update): void
     $awaiting = $store->getAwaiting((string) $userId);
     $link = findLink($text);
 
+    if (handleTerminologyCommand($text)) {
+        return;
+    }
+
     if ($awaiting !== null && $link !== null) {
         // We asked for an article link and this is the answer.
         $store->clearAwaiting((string) $userId);
@@ -325,6 +343,110 @@ function findLink(string $text): ?string
     return null;
 }
 
+/** Handle user-managed translation terminology slash commands. */
+function handleTerminologyCommand(string $text): bool
+{
+    global $store, $telegram, $chatId, $log, $termOverrides;
+
+    if (preg_match('#^/jcm_term(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$#us', trim($text), $match) === 1) {
+        $argument = trim((string) ($match[1] ?? ''));
+
+        if ($argument === '') {
+            $terms = $termOverrides;
+            $message = 'برای اصلاح واژه بنویس:' . "\n" . '/jcm_term Mattermost = مترموست'
+                . "\n\n" . 'اصلاح‌ها در ترجمه‌های بعدی اعمال می‌شوند.';
+
+            if ($terms !== []) {
+                $message .= "\n\n" . formatTermOverrides($terms);
+            }
+
+            $telegram->sendMessage($chatId, Persian::rtl($message));
+
+            return true;
+        }
+
+        $separator = strpos($argument, '=');
+
+        if ($separator === false) {
+            $telegram->sendMessage($chatId, Persian::rtl(
+                'ساختار درست:' . "\n" . '/jcm_term واژهٔ انگلیسی = معادل فارسی'
+            ));
+
+            return true;
+        }
+
+        $source = trim(substr($argument, 0, $separator));
+        $target = trim(substr($argument, $separator + 1));
+
+        try {
+            $store->saveTermOverride($source, $target);
+        } catch (Throwable $e) {
+            $telegram->sendMessage($chatId, Persian::rtl($e->getMessage()));
+
+            return true;
+        }
+
+        $log('translation term updated');
+        $telegram->sendMessage($chatId, Persian::rtl(
+            'اصلاح ثبت شد: ' . $source . ' ← ' . $target . "\n"
+            . 'در ترجمه‌های بعدی به‌صورت قطعی اعمال می‌شود.'
+        ));
+
+        return true;
+    }
+
+    if (preg_match('#^/jcm_terms(?:@[A-Za-z0-9_]+)?$#u', trim($text)) === 1) {
+        $terms = $termOverrides;
+        $message = $terms === [] ? 'هنوز اصلاح واژگانی ثبت نشده است.' : formatTermOverrides($terms);
+        $message .= "\n\n" . 'برای حذف: /jcm_term_remove واژهٔ انگلیسی';
+        $telegram->sendMessage($chatId, Persian::rtl($message));
+
+        return true;
+    }
+
+    if (preg_match('#^/jcm_term_remove(?:@[A-Za-z0-9_]+)?\s+(.+)$#us', trim($text), $match) === 1) {
+        $source = trim($match[1]);
+
+        if ($store->deleteTermOverride($source)) {
+            $telegram->sendMessage($chatId, Persian::rtl('اصلاح واژهٔ «' . $source . '» حذف شد.'));
+        } else {
+            $telegram->sendMessage($chatId, Persian::rtl('برای این واژه اصلاحی ثبت نشده است.'));
+        }
+
+        $log('translation term removed');
+
+        return true;
+    }
+
+    return false;
+}
+
+/** @param array<string, string> $terms */
+function formatTermOverrides(array $terms): string
+{
+    $lines = ['اصلاح‌های ذخیره‌شده:'];
+    $length = mb_strlen($lines[0], 'UTF-8');
+    $shown = 0;
+
+    foreach ($terms as $source => $target) {
+        $line = $source . ' ← ' . $target;
+
+        if ($length + mb_strlen($line, 'UTF-8') + 1 > 3200) {
+            break;
+        }
+
+        $lines[] = $line;
+        $length += mb_strlen($line, 'UTF-8') + 1;
+        $shown++;
+    }
+
+    if ($shown < count($terms)) {
+        $lines[] = '... و ' . (count($terms) - $shown) . ' مورد دیگر';
+    }
+
+    return implode("\n", $lines);
+}
+
 /**
  * Ask whether to update the existing topic or create a missing one, with buttons.
  */
@@ -368,6 +490,9 @@ function menuText(): string
     return Persian::rtl(
         'ربات ترجمهٔ مقالات مجلهٔ جوملا' . "\n\n"
         . 'لینک مقاله را بفرست؛ ترجمهٔ فارسی‌اش را در تاپیک خودش می‌گذارم.' . "\n"
+        . 'اصلاح واژه: /jcm_term Mattermost = مترموست' . "\n"
+        . 'فهرست اصلاح‌ها: /jcm_terms' . "\n"
+        . 'حذف اصلاح: /jcm_term_remove Mattermost' . "\n"
         . 'ساختار لینک:' . "\n"
         . 'https://magazine.joomla.org/issues/...'
     );
