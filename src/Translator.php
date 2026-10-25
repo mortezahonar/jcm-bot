@@ -19,6 +19,11 @@ final class Translator
     /** @var array<int, array{type:string, data:array}> */
     private array $atoms = [];
 
+    /** @var list<array{href:string, label:string}> */
+    private array $sourceLinks = [];
+
+    private int $nextOpeningLink = 0;
+
     public function __construct(
         private TextGenerator $generator,
         private string $systemPrompt,
@@ -50,6 +55,8 @@ final class Translator
         }
 
         $this->atoms = [];
+        $this->sourceLinks = $this->extractSourceLinks($source);
+        $this->nextOpeningLink = 0;
         $protected = $this->protect($source);
 
         if (trim($protected) === '') {
@@ -108,14 +115,24 @@ final class Translator
             return $this->atom('img', ['src' => $src, 'alt' => $alt]);
         }, $s) ?? $s;
 
-        // Opening anchors
-        $s = preg_replace_callback('#<a\s+[^>]*href="([^"]*)"[^>]*>#i', function (array $m): string {
-            return $this->atom('linkopen', ['href' => $m[1]]);
-        }, $s) ?? $s;
+        // Replace each complete anchor as a pair so open/close markers cannot drift.
+        $s = preg_replace_callback('#<a\b([^>]*)>(.*?)</a\s*>#is', function (array $m): string {
+            $href = $this->extractHrefAttribute($m[1]);
 
-        // Closing anchors
-        $s = preg_replace_callback('#</a>#i', function (): string {
-            return $this->atom('linkclose', []);
+            if ($href === null) {
+                return $m[2];
+            }
+
+            $linkId = $this->nextOpeningLink++;
+            $fallback = $this->sourceLinks[$linkId] ?? ['href' => $href, 'label' => ''];
+            $open = $this->atom('linkopen', [
+                'href'    => $fallback['href'],
+                'label'   => $fallback['label'],
+                'link_id' => $linkId,
+            ]);
+            $close = $this->atom('linkclose', ['link_id' => $linkId]);
+
+            return $open . $m[2] . $close;
         }, $s) ?? $s;
 
         // Code spans (content is never translated)
@@ -123,14 +140,12 @@ final class Translator
             return $this->atom('code', ['text' => html_entity_decode($m[1], ENT_QUOTES)]);
         }, $s) ?? $s;
 
-        // HTML entities written literally in the source
+        // Bare URLs outside anchors; a URL used as an anchor label is already clickable.
+        $s = $this->protectBareUrls($s);
+
+        // HTML entities written literally in the source, after capturing full bare URLs.
         $s = preg_replace_callback('~&(?:[a-zA-Z]+|#[0-9]+);~', function (array $m): string {
             return $this->atom('entity', ['text' => $m[0]]);
-        }, $s) ?? $s;
-
-        // Bare URLs
-        $s = preg_replace_callback('#https?://[^\s<>"\]]+#i', function (array $m): string {
-            return $this->atom('url', ['url' => rtrim($m[0], '.,;:)')]);
         }, $s) ?? $s;
 
         $s = $this->protectTermOverrides($s);
@@ -151,6 +166,7 @@ final class Translator
 
     private function restore(string $s): string
     {
+        $s = $this->repairMissingLinkPlaceholders($s);
         $pattern = '#' . self::L . '(\d+)' . self::R . '#u';
 
         return preg_replace_callback($pattern, function (array $m): string {
@@ -173,7 +189,9 @@ final class Translator
 
         switch ($atom['type']) {
             case 'linkopen':
-                return '<a href="' . $this->esc((string) $data['href']) . '">';
+                $href = (string) $data['href'];
+
+                return '<a href="' . $this->esc($href) . '">';
             case 'linkclose':
                 return '</a>';
             case 'code':
@@ -258,6 +276,212 @@ final class Translator
         $this->atoms[$id] = ['type' => $type, 'data' => $data];
 
         return self::L . $id . self::R;
+    }
+
+    /** @return list<array{href:string, label:string}> */
+    private function extractSourceLinks(string $source): array
+    {
+        $count = preg_match_all('#<a\b([^>]*)>(.*?)</a\s*>#is', $source, $matches, PREG_SET_ORDER);
+
+        if ($count === false || $count === 0) {
+            return [];
+        }
+
+        $links = [];
+
+        foreach ($matches as $match) {
+            $href = $this->extractHrefAttribute($match[1]);
+
+            if ($href === null) {
+                continue;
+            }
+
+            $label = html_entity_decode(strip_tags($match[2]), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $label = trim(preg_replace('/\s+/u', ' ', $label) ?? $label);
+            $links[] = [
+                'href'  => $href,
+                'label' => $label,
+            ];
+        }
+
+        return $links;
+    }
+
+    private function extractHrefAttribute(string $attributes): ?string
+    {
+        if (preg_match("~\\bhref\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))~i", $attributes, $match) !== 1) {
+            return null;
+        }
+
+        $href = (string) ($match[1] ?? '');
+
+        if ($href === '' && isset($match[2])) {
+            $href = $match[2];
+        }
+
+        if ($href === '' && isset($match[3])) {
+            $href = $match[3];
+        }
+
+        return html_entity_decode($href, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    }
+
+    private function protectBareUrls(string $text): string
+    {
+        $tokenPattern = '#(' . self::L . '\d+' . self::R . ')#u';
+        $parts = preg_split($tokenPattern, $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+
+        if (!is_array($parts)) {
+            return $text;
+        }
+
+        $anchorDepth = 0;
+
+        foreach ($parts as &$part) {
+            if (preg_match('#^' . self::L . '(\d+)' . self::R . '$#u', $part, $match) === 1) {
+                $atom = $this->atoms[(int) $match[1]] ?? null;
+
+                if (is_array($atom) && $atom['type'] === 'linkopen') {
+                    $anchorDepth++;
+                } elseif (is_array($atom) && $atom['type'] === 'linkclose') {
+                    $anchorDepth = max(0, $anchorDepth - 1);
+                }
+
+                continue;
+            }
+
+            if ($anchorDepth === 0) {
+                $part = preg_replace_callback('#https?://[^\s<>"\]]+#i', function (array $url): string {
+                    $href = html_entity_decode(rtrim($url[0], '.,;:)'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+                    return $this->atom('url', ['url' => $href]);
+                }, $part) ?? $part;
+            }
+        }
+        unset($part);
+
+        return implode('', $parts);
+    }
+
+    private function repairMissingLinkPlaceholders(string $translated): string
+    {
+        $links = [];
+        $bareUrls = [];
+
+        foreach ($this->atoms as $atomId => $atom) {
+            if ($atom['type'] === 'url') {
+                $bareUrls[$atomId] = (string) ($atom['data']['url'] ?? '');
+
+                continue;
+            }
+
+            $linkId = $atom['data']['link_id'] ?? null;
+
+            if (!is_int($linkId)) {
+                continue;
+            }
+
+            if ($atom['type'] === 'linkopen') {
+                $links[$linkId]['open'] = $atomId;
+                $links[$linkId]['data'] = $atom['data'];
+            } elseif ($atom['type'] === 'linkclose') {
+                $links[$linkId]['close'] = $atomId;
+            }
+        }
+
+        if ($links === [] && $bareUrls === []) {
+            return $translated;
+        }
+
+        ksort($links);
+        $lastClosePosition = -1;
+        $valid = true;
+        $anchorRanges = [];
+
+        foreach ($links as $link) {
+            if (!isset($link['open'], $link['close'])) {
+                $valid = false;
+                break;
+            }
+
+            $openToken = self::L . $link['open'] . self::R;
+            $closeToken = self::L . $link['close'] . self::R;
+
+            if (substr_count($translated, $openToken) !== 1 || substr_count($translated, $closeToken) !== 1) {
+                $valid = false;
+                break;
+            }
+
+            $openPosition = strpos($translated, $openToken);
+            $closePosition = strpos($translated, $closeToken);
+
+            if ($openPosition === false || $closePosition === false || $openPosition <= $lastClosePosition || $closePosition <= $openPosition) {
+                $valid = false;
+                break;
+            }
+
+            $lastClosePosition = $closePosition + strlen($closeToken);
+            $anchorRanges[] = [$openPosition, $closePosition];
+        }
+
+        $fallbackLinks = [];
+
+        if (!$valid) {
+            $anchorRanges = [];
+
+            foreach ($links as $link) {
+                if (!isset($link['open'], $link['data'])) {
+                    continue;
+                }
+
+                $openToken = self::L . $link['open'] . self::R;
+                $translated = str_replace($openToken, '', $translated);
+
+                if (isset($link['close'])) {
+                    $closeToken = self::L . $link['close'] . self::R;
+                    $translated = str_replace($closeToken, '', $translated);
+                }
+
+                $href = (string) ($link['data']['href'] ?? '');
+                $label = trim((string) ($link['data']['label'] ?? ''));
+
+                if ($href !== '') {
+                    $fallbackLinks[] = '<a href="' . $this->esc($href) . '">' . $this->esc($label === '' ? $href : $label) . '</a>';
+                }
+            }
+        }
+
+        foreach ($bareUrls as $atomId => $url) {
+            $token = self::L . $atomId . self::R;
+            $urlPosition = strpos($translated, $token);
+            $insideAnchor = false;
+
+            if ($urlPosition !== false) {
+                foreach ($anchorRanges as [$openPosition, $closePosition]) {
+                    if ($urlPosition > $openPosition && $urlPosition < $closePosition) {
+                        $insideAnchor = true;
+                        break;
+                    }
+                }
+            }
+
+            if (substr_count($translated, $token) === 1 && !$insideAnchor) {
+                continue;
+            }
+
+            $translated = str_replace($token, '', $translated);
+            if ($url !== '') {
+                $fallbackLinks[] = '<a href="' . $this->esc($url) . '">' . $this->esc($url) . '</a>';
+            }
+        }
+
+        if ($fallbackLinks === []) {
+            return $translated;
+        }
+
+        $separator = trim($translated) === '' ? '' : "\n\n";
+
+        return rtrim($translated) . $separator . implode("\n", $fallbackLinks);
     }
 
     private function protectTermOverrides(string $text): string
