@@ -2,29 +2,10 @@
 
 declare(strict_types=1);
 
-/**
- * A backend that speaks the OpenAI chat completions protocol.
- *
- * Used for the stand-in provider that takes over when Gemini is unavailable.
- */
+/** OpenAI Chat Completions-compatible text generator. */
 final class OpenAiCompatible implements TextGenerator
 {
-    /**
-     * HTTP statuses that are worth retrying (transient overload or server side).
-     */
     private const RETRYABLE_STATUS = [429, 500, 502, 503, 504];
-
-    /**
-     * How many times the provider is tried before giving up.
-     */
-    private const MAX_ATTEMPTS = 3;
-
-    private const RETRY_DELAY = 3;
-
-    /** Bound one fallback call while leaving headroom for the full plan. */
-    private const MAX_REQUEST_TIMEOUT = 40;
-
-    private const MAX_TRANSPORT_TIMEOUT_RETRIES = 1;
 
     /** @var (\Closure(string, string, int): array{status: int, json: mixed, raw: string})|null */
     private ?Closure $requester = null;
@@ -34,9 +15,19 @@ final class OpenAiCompatible implements TextGenerator
         private string $baseUrl,
         private string $model,
         private int $maxTokens = 8192,
-        ?callable $requester = null
+        ?callable $requester = null,
+        private int $maxAttempts = 3,
+        private int $retryDelay = 3,
+        private int $maxRequestTimeout = 60,
+        private int $maxTransportTimeoutRetries = 0,
+        private int $transportTimeoutDelay = 1
     ) {
         $this->requester = $requester !== null ? Closure::fromCallable($requester) : null;
+        $this->maxAttempts = max(1, $this->maxAttempts);
+        $this->retryDelay = max(0, $this->retryDelay);
+        $this->maxRequestTimeout = max(1, $this->maxRequestTimeout);
+        $this->maxTransportTimeoutRetries = max(0, $this->maxTransportTimeoutRetries);
+        $this->transportTimeoutDelay = max(0, $this->transportTimeoutDelay);
     }
 
     public function generate(string $system, string $userText, int $timeout = 60): string
@@ -44,22 +35,24 @@ final class OpenAiCompatible implements TextGenerator
         $lastError = null;
         $transportTimeoutRetries = 0;
 
-        for ($attempt = 1; $attempt <= self::MAX_ATTEMPTS; $attempt++) {
+        for ($attempt = 1; $attempt <= $this->maxAttempts; $attempt++) {
             $started = microtime(true);
 
             try {
-                $res = $this->request($system, $userText, min($timeout, self::MAX_REQUEST_TIMEOUT));
+                $res = $this->request($system, $userText, min($timeout, $this->maxRequestTimeout));
             } catch (Throwable $e) {
                 $lastError = $e;
 
                 if (
                     stripos($e->getMessage(), 'timed out') !== false
-                    && $transportTimeoutRetries < self::MAX_TRANSPORT_TIMEOUT_RETRIES
-                    && $attempt < self::MAX_ATTEMPTS
+                    && $transportTimeoutRetries < $this->maxTransportTimeoutRetries
+                    && $attempt < $this->maxAttempts
                 ) {
                     $transportTimeoutRetries++;
-                    Log::write('fallback ' . $this->model . ': transport timeout; retrying once');
-                    sleep(1);
+                    Log::write('fallback ' . $this->model . ': transport timeout; retrying');
+                    if ($this->transportTimeoutDelay > 0) {
+                        sleep($this->transportTimeoutDelay);
+                    }
 
                     continue;
                 }
@@ -85,11 +78,10 @@ final class OpenAiCompatible implements TextGenerator
                     return $text;
                 }
 
-                $reason    = $res['json']['choices'][0]['finish_reason'] ?? 'unknown';
+                $reason = $res['json']['choices'][0]['finish_reason'] ?? 'unknown';
                 $lastError = new RuntimeException(
-                    'Provider returned no text (finishReason=' . $reason . ', model=' . $this->model . '): ' . $res['raw']
+                    'Provider returned no text (finishReason=' . $reason . ', model=' . $this->model . ')'
                 );
-
                 Log::write(
                     'fallback ' . $this->model . ' attempt ' . $attempt . ': no text (finishReason=' . $reason . ')'
                 );
@@ -97,10 +89,7 @@ final class OpenAiCompatible implements TextGenerator
                 break;
             }
 
-            $lastError = new RuntimeException(
-                'Provider HTTP ' . $status . ' (model=' . $this->model . '): ' . $res['raw']
-            );
-
+            $lastError = new RuntimeException('Provider HTTP ' . $status . ' (model=' . $this->model . ')');
             Log::write(
                 'fallback ' . $this->model . ' attempt ' . $attempt . ': HTTP ' . $status
                 . ' in ' . self::ms($started) . 'ms'
@@ -110,12 +99,12 @@ final class OpenAiCompatible implements TextGenerator
                 break;
             }
 
-            if ($attempt < self::MAX_ATTEMPTS) {
-                $delay = self::RETRY_DELAY * $attempt;
-
+            if ($attempt < $this->maxAttempts) {
+                $delay = $this->retryDelay * $attempt;
                 Log::write('fallback ' . $this->model . ': waiting ' . $delay . 's');
-
-                sleep($delay);
+                if ($delay > 0) {
+                    sleep($delay);
+                }
             }
         }
 
@@ -153,15 +142,14 @@ final class OpenAiCompatible implements TextGenerator
         }
 
         $url = rtrim($this->baseUrl, '/') . '/chat/completions';
-
         $payload = [
-            'model'       => $this->model,
-            'messages'    => [
+            'model' => $this->model,
+            'messages' => [
                 ['role' => 'system', 'content' => $system],
                 ['role' => 'user', 'content' => $userText],
             ],
             'temperature' => 0.0,
-            'max_tokens'  => $this->maxTokens,
+            'max_tokens' => $this->maxTokens,
         ];
 
         return Http::json(

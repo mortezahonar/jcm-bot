@@ -10,6 +10,7 @@ final class Http
      * JSON request. Returns ['status' => int, 'raw' => string, 'json' => mixed].
      *
      * @param array<string, string> $headers
+     * @return array{status: int, raw: string, json: mixed}
      */
     public static function json(
         string $method,
@@ -45,20 +46,19 @@ final class Http
         }
 
         curl_setopt_array($ch, $opts);
-
         $raw = curl_exec($ch);
         $error = curl_error($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
         if ($raw === false) {
-            throw new RuntimeException('HTTP request failed: ' . $error . ' (' . $url . ')');
+            throw new RuntimeException('HTTP request failed: ' . $error . ' (' . self::redactUrl($url) . ')');
         }
 
         return [
             'status' => $status,
-            'raw'    => $raw,
-            'json'   => json_decode($raw, true),
+            'raw' => $raw,
+            'json' => json_decode($raw, true),
         ];
     }
 
@@ -66,11 +66,11 @@ final class Http
      * Multipart/form POST. Returns ['status' => int, 'raw' => string, 'json' => mixed].
      *
      * @param array<string, mixed> $fields
+     * @return array{status: int, raw: string, json: mixed}
      */
     public static function form(string $url, array $fields, int $timeout = 60): array
     {
         $ch = curl_init($url);
-
         $opts = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST           => true,
@@ -84,32 +84,30 @@ final class Http
         }
 
         curl_setopt_array($ch, $opts);
-
         $raw = curl_exec($ch);
         $error = curl_error($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
         if ($raw === false) {
-            throw new RuntimeException('HTTP form request failed: ' . $error . ' (' . $url . ')');
+            throw new RuntimeException('HTTP form request failed: ' . $error . ' (' . self::redactUrl($url) . ')');
         }
 
         return [
             'status' => $status,
-            'raw'    => $raw,
-            'json'   => json_decode($raw, true),
+            'raw' => $raw,
+            'json' => json_decode($raw, true),
         ];
     }
 
     /**
-     * Fetch a page as text (used to read magazine articles).
+     * Fetch a page as text.
      *
      * @return array{status: int, body: string}
      */
     public static function get(string $url, int $timeout = 60): array
     {
         $ch = curl_init($url);
-
         $opts = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT        => $timeout,
@@ -124,19 +122,32 @@ final class Http
         }
 
         curl_setopt_array($ch, $opts);
-
         $body = curl_exec($ch);
         $error = curl_error($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
         if ($body === false) {
-            throw new RuntimeException('HTTP GET failed: ' . $error . ' (' . $url . ')');
+            throw new RuntimeException('HTTP GET failed: ' . $error . ' (' . self::redactUrl($url) . ')');
         }
 
         return [
             'status' => $status,
-            'body'   => (string) $body,
+            'body' => (string) $body,
         ];
+    }
+
+    private static function redactUrl(string $url): string
+    {
+        $safe = preg_replace_callback(
+            '/([?&][^=&#]+)=([^&#]*)/',
+            static fn (array $match): string => $match[1] . '=[REDACTED]',
+            $url
+        ) ?? '[URL redacted]';
+
+        $safe = preg_replace('~(https?://[^/?#]+)/bot[^/?#]+~i', '$1/bot[REDACTED]', $safe) ?? '[URL redacted]';
+        $safe = preg_replace('~(https?://)[^/@]+@~i', '$1[REDACTED]@', $safe) ?? '[URL redacted]';
+
+        return $safe;
     }
 }

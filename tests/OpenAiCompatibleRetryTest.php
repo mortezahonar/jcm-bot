@@ -31,10 +31,13 @@ $retrying = new OpenAiCompatible(
 
         return [
             'status' => 200,
-            'json'   => ['choices' => [['message' => ['content' => 'fallback answer']]]],
-            'raw'    => '{}',
+            'json' => ['choices' => [['message' => ['content' => 'fallback answer']]]],
+            'raw' => '{}',
         ];
-    }
+    },
+    maxRequestTimeout: 40,
+    maxTransportTimeoutRetries: 1,
+    transportTimeoutDelay: 0
 );
 
 $assert($retrying->generate('system', 'source') === 'fallback answer', 'a timed-out fallback request should be retried once');
@@ -51,10 +54,13 @@ $shortTimeout = new OpenAiCompatible(
 
         return [
             'status' => 200,
-            'json'   => ['choices' => [['message' => ['content' => 'ok']]]],
-            'raw'    => '{}',
+            'json' => ['choices' => [['message' => ['content' => 'ok']]]],
+            'raw' => '{}',
         ];
-    }
+    },
+    maxRequestTimeout: 40,
+    maxTransportTimeoutRetries: 1,
+    transportTimeoutDelay: 0
 );
 
 $assert($shortTimeout->generate('system', 'source', 12) === 'ok', 'the shorter caller timeout should be respected');
@@ -69,7 +75,10 @@ $nonTimeout = new OpenAiCompatible(
     static function (string $system, string $userText, int $timeout) use (&$failedCalls): array {
         $failedCalls++;
         throw new RuntimeException('Could not resolve host');
-    }
+    },
+    maxRequestTimeout: 40,
+    maxTransportTimeoutRetries: 1,
+    transportTimeoutDelay: 0
 );
 
 try {
@@ -79,4 +88,4 @@ try {
     $assert($failedCalls === 1, 'non-timeout transport errors must not be retried as timeouts');
 }
 
-fwrite(STDOUT, "OK: OpenAI-compatible timeout retry, cap and passthrough tests passed.\n");
+fwrite(STDOUT, "OK: OpenAI-compatible JCM timeout policy tests passed.\n");

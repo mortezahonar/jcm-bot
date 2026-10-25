@@ -81,7 +81,8 @@ final class Telegram
      * Rich messages are the only way to get a Persian message laid out from
      * the right. Two details matter: Telegram does not turn a newline into a
      * line break, and the bubble only starts from the right when the message
-     * ends with a real <br> tag.
+     * ends with a real <br> tag. The RTL marks are kept so multiline text does
+     * not become left-aligned in desktop clients.
      */
     private static function richMessage(string $text): string
     {

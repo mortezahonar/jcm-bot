@@ -25,7 +25,8 @@ final class Persian
     ];
 
     /**
-     * Convert an ISO-8601 timestamp to Jalali text with Iran time.
+     * Convert an ISO-8601 timestamp with an explicit timezone to Jalali text
+     * with Iran time (UTC+03:30).
      * Example: 2026-10-20T06:00:00+00:00 -> "۲۸ مهر ۱۴۰۵ — ساعت ۰۹:۳۰"
      */
     public static function date(string $iso): string

@@ -6,73 +6,45 @@ final class Gemini implements TextGenerator
 {
     private const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/';
 
-    /**
-     * HTTP statuses worth retrying against the same model. A 429 moves to the
-     * next configured model immediately: waiting/repeating it for every article
-     * segment can exceed the GitHub Actions job timeout.
-     */
-    private const RETRYABLE_STATUS = [500, 502, 503, 504];
-
-    /**
-     * How many times each model is tried before moving on to the next one.
-     */
-    private const MAX_ATTEMPTS = 3;
-
-    private const RETRY_DELAY = 3;
-
-    /**
-     * Keep an unresponsive model from consuming most of the GitHub Actions
-     * job budget for every sequential article segment.
-     */
-    private const MAX_REQUEST_TIMEOUT = 30;
-
     /** @var string[] */
     private array $models;
 
-    /** @var (\Closure(string, string, string, int): array)|null */
+    /** @var int[] */
+    private array $retryableStatus;
+
+    /** @var (\Closure(string, string, string, int): array{status: int, json: mixed, raw: string})|null */
     private ?Closure $requester = null;
 
-    /**
-     * @param string $models Comma separated list of model names, tried in order.
-     */
     public function __construct(
         private string $apiKey,
         string $models = 'gemini-3.5-flash',
-        ?callable $requester = null
+        ?callable $requester = null,
+        private int $maxAttempts = 3,
+        private int $retryDelay = 3,
+        private int $maxRequestTimeout = 60,
+        array $retryableStatus = [429, 500, 502, 503, 504]
     ) {
-        $list = array_values(array_filter(array_map('trim', explode(',', $models)), static fn (string $m): bool => $m !== ''));
-
+        $list = array_values(array_filter(array_map('trim', explode(',', $models)), static fn (string $model): bool => $model !== ''));
         $this->models = $list !== [] ? $list : ['gemini-3.5-flash'];
         $this->requester = $requester !== null ? Closure::fromCallable($requester) : null;
+        $this->maxAttempts = max(1, $this->maxAttempts);
+        $this->retryDelay = max(0, $this->retryDelay);
+        $this->maxRequestTimeout = max(1, $this->maxRequestTimeout);
+        $this->retryableStatus = array_values(array_unique(array_map('intval', $retryableStatus)));
     }
 
-    /**
-     * Generate text from a system instruction and a user prompt.
-     *
-     * Falls back to the next configured model when a model is unavailable,
-     * and retries transient failures a few times before giving up.
-     */
     public function generate(string $system, string $userText, int $timeout = 60): string
     {
         $lastError = null;
 
         foreach ($this->models as $model) {
-            for ($attempt = 1; $attempt <= self::MAX_ATTEMPTS; $attempt++) {
+            for ($attempt = 1; $attempt <= $this->maxAttempts; $attempt++) {
                 $started = microtime(true);
 
                 try {
-                    $res = $this->request(
-                        $model,
-                        $system,
-                        $userText,
-                        min($timeout, self::MAX_REQUEST_TIMEOUT)
-                    );
+                    $res = $this->request($model, $system, $userText, min($timeout, $this->maxRequestTimeout));
                 } catch (Throwable $e) {
-                    // A transport failure (timeout, connection reset) carries no
-                    // HTTP status to retry on: try the next model right away
-                    // instead of waiting on the same one again.
                     $lastError = $e;
-
                     Log::write(
                         'gemini ' . $model . ' attempt ' . $attempt . ': transport failure after '
                         . self::ms($started) . 'ms: ' . $e->getMessage()
@@ -94,41 +66,31 @@ final class Gemini implements TextGenerator
                         return $text;
                     }
 
-                    $reason    = $res['json']['candidates'][0]['finishReason'] ?? 'unknown';
+                    $reason = $res['json']['candidates'][0]['finishReason'] ?? 'unknown';
                     $lastError = new RuntimeException(
-                        'Gemini returned no text (finishReason=' . $reason . ', model=' . $model . '): ' . $res['raw']
+                        'Gemini returned no text (finishReason=' . $reason . ', model=' . $model . ')'
                     );
-
                     Log::write('gemini ' . $model . ' attempt ' . $attempt . ': no text (finishReason=' . $reason . ')');
 
                     break;
                 }
 
-                $lastError = new RuntimeException(
-                    'Gemini HTTP ' . $status . ' (model=' . $model . '): ' . $res['raw']
-                );
-
+                $lastError = new RuntimeException('Gemini HTTP ' . $status . ' (model=' . $model . ')');
                 Log::write(
                     'gemini ' . $model . ' attempt ' . $attempt . ': HTTP ' . $status
                     . ' in ' . self::ms($started) . 'ms'
                 );
 
-                if ($status === 429) {
-                    Log::write('gemini ' . $model . ': rate limited; moving to the next model without retry delay');
-
+                if (!in_array($status, $this->retryableStatus, true)) {
                     break;
                 }
 
-                if (!in_array($status, self::RETRYABLE_STATUS, true)) {
-                    break;
-                }
-
-                if ($attempt < self::MAX_ATTEMPTS) {
-                    $delay = self::RETRY_DELAY * $attempt;
-
+                if ($attempt < $this->maxAttempts) {
+                    $delay = $this->retryDelay * $attempt;
                     Log::write('gemini ' . $model . ': waiting ' . $delay . 's');
-
-                    sleep($delay);
+                    if ($delay > 0) {
+                        sleep($delay);
+                    }
                 }
             }
         }
@@ -173,18 +135,13 @@ final class Gemini implements TextGenerator
         }
 
         $url = self::ENDPOINT . rawurlencode($model) . ':generateContent?key=' . rawurlencode($this->apiKey);
-
         $payload = [
-            'systemInstruction' => [
-                'parts' => [['text' => $system]],
-            ],
-            'contents' => [
-                ['role' => 'user', 'parts' => [['text' => $userText]]],
-            ],
+            'systemInstruction' => ['parts' => [['text' => $system]]],
+            'contents' => [['role' => 'user', 'parts' => [['text' => $userText]]]],
             'generationConfig' => [
-                'temperature'      => 0.0,
-                'topP'             => 0.95,
-                'maxOutputTokens'  => 8192,
+                'temperature' => 0.0,
+                'topP' => 0.95,
+                'maxOutputTokens' => 8192,
             ],
         ];
 

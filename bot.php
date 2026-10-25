@@ -29,7 +29,14 @@ foreach (['bot_token', 'chat_id', 'gemini_api_key'] as $required) {
 }
 
 $telegram = new Telegram((string) $config['bot_token']);
-$gemini = new Gemini((string) $config['gemini_api_key'], (string) $config['gemini_model']);
+$gemini = new Gemini(
+    (string) $config['gemini_api_key'],
+    (string) $config['gemini_model'],
+    maxAttempts: 3,
+    retryDelay: 3,
+    maxRequestTimeout: 30,
+    retryableStatus: [500, 502, 503, 504]
+);
 
 // Gemini is tried first; the stand-in provider takes over when Gemini is
 // unavailable and a key for it has been configured.
@@ -39,7 +46,9 @@ if ((string) $config['fallback_api_key'] !== '') {
     $generators[] = new OpenAiCompatible(
         (string) $config['fallback_api_key'],
         (string) $config['fallback_base_url'],
-        (string) $config['fallback_model']
+        (string) $config['fallback_model'],
+        maxRequestTimeout: 40,
+        maxTransportTimeoutRetries: 1
     );
 }
 

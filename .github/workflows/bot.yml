@@ -43,6 +43,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Shared provider regression tests
+        run: |
+          php tests/SharedProviderPolicyTest.php
+          php tests/HttpRedactionTest.php
+          php tests/GeminiRetryTest.php
+          php tests/OpenAiCompatibleRetryTest.php
+
       - name: Gemini key check
         if: github.event_name == 'workflow_dispatch' && inputs.test_key
         env:
