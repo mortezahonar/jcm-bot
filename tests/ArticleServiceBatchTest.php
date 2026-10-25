@@ -8,6 +8,7 @@ require __DIR__ . '/../src/TextGenerator.php';
 require __DIR__ . '/../src/Persian.php';
 require __DIR__ . '/../src/Translator.php';
 require __DIR__ . '/../src/Store.php';
+require __DIR__ . '/../src/Magazine.php';
 require __DIR__ . '/../src/ArticleService.php';
 
 final class RecordingArticleGenerator implements TextGenerator
@@ -57,7 +58,8 @@ $translator = new Translator($generator, 'test system prompt');
 $fetcher = static function (string $url, int $timeout) use ($html): array {
     return ['status' => 200, 'body' => $html];
 };
-$service = new ArticleService($translator, $store, $fetcher);
+$magazine = new Magazine($fetcher);
+$service = new ArticleService($translator, $store, $magazine);
 $plan = $service->plan('https://magazine.joomla.org/issues/2026/sample-article', false);
 
 $assert(count($generator->inputs) === 4, 'title plus three bounded article text units should require four generator calls');
@@ -72,6 +74,15 @@ $assert($generator->inputs[3] === $afterImage, 'text after a figure should be tr
 $assert(
     array_column($plan['actions'], 'kind') === ['topic', 'message', 'message', 'photo', 'message'],
     'the action plan must preserve text/image order'
+);
+$photos = array_values(array_filter($plan['actions'], static fn (array $action): bool => $action['kind'] === 'photo'));
+$assert(
+    count($photos) === 1 && $photos[0]['url'] === 'https://magazine.joomla.org/images/sample.jpg',
+    'relative figure image URLs should stay absolute after the adapter split'
+);
+$assert(
+    ArticleService::slug('https://magazine.joomla.org/issues/2026/sample-article') === Magazine::slug('https://magazine.joomla.org/issues/2026/sample-article'),
+    'the legacy slug helper should delegate to the Magazine adapter'
 );
 
 fwrite(STDOUT, "OK: article batching, input threshold and image ordering tests passed.\n");

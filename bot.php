@@ -12,6 +12,7 @@ require __DIR__ . '/src/OpenAiCompatible.php';
 require __DIR__ . '/src/FallbackGenerator.php';
 require __DIR__ . '/src/Translator.php';
 require __DIR__ . '/src/Store.php';
+require __DIR__ . '/src/Magazine.php';
 require __DIR__ . '/src/ArticleService.php';
 
 $config = require __DIR__ . '/config.php';
@@ -54,7 +55,8 @@ if ((string) $config['glossary_path'] !== '' && is_file((string) $config['glossa
 }
 
 $translator = new Translator($generator, $systemPrompt, $glossary);
-$service = new ArticleService($translator, $store);
+$magazine = new Magazine();
+$service = new ArticleService($translator, $store, $magazine);
 
 $chatId = (string) $config['chat_id'];
 $allowedUsers = array_map('strval', (array) $config['allowed_user_ids']);
@@ -294,7 +296,7 @@ function offerTopic(string $link): void
 {
     global $store, $telegram, $chatId, $log;
 
-    $slug = ArticleService::slug($link);
+    $slug = Magazine::slug($link);
 
     if ($slug === '') {
         $telegram->sendMessage($chatId, Persian::rtl(

@@ -3,28 +3,21 @@
 declare(strict_types=1);
 
 /**
- * Fetches a magazine article and turns it into the list of Telegram actions
- * that publish its Persian translation.
+ * Plans translation and Telegram actions for article data fetched by Magazine.
  */
 final class ArticleService
 {
-    private const BASE = 'https://magazine.joomla.org';
-
     /** Telegram rejects messages over 4096 characters; leave headroom. */
     private const MAX_MESSAGE = 3500;
 
     /** Batch adjacent article text into PR-like body units, while keeping input bounded. */
     private const MAX_TRANSLATION_INPUT = 2500;
 
-    /** @var (\Closure(string, int): array{status: int, body: string})|null */
-    private ?Closure $fetcher = null;
-
     public function __construct(
         private Translator $translator,
         private Store $store,
-        ?callable $fetcher = null
+        private Magazine $magazine
     ) {
-        $this->fetcher = $fetcher !== null ? Closure::fromCallable($fetcher) : null;
     }
 
     /**
@@ -41,21 +34,13 @@ final class ArticleService
     public function plan(string $url, bool $isUpdate): array
     {
         $url  = rtrim(trim($url), '/');
-        $slug = self::slug($url);
+        $slug = Magazine::slug($url);
 
         if ($slug === '') {
             throw new RuntimeException('این لینک، لینک مقالهٔ مجلهٔ جوملا نیست.');
         }
 
-        $res = $this->fetcher !== null
-            ? ($this->fetcher)($url, 90)
-            : Http::get($url, 90);
-
-        if ($res['status'] !== 200) {
-            throw new RuntimeException('magazine.joomla.org جواب ' . $res['status'] . ' داد.');
-        }
-
-        $article = $this->parse($res['body']);
+        $article = $this->magazine->fetch($url);
 
         if ($article['title'] === '') {
             throw new RuntimeException('عنوان مقاله در صفحه پیدا نشد.');
@@ -146,129 +131,10 @@ final class ArticleService
         ];
     }
 
-    /**
-     * The last path segment of an article URL, used as the stable key of the
-     * topic map. Anything unexpected yields an empty string.
-     */
+    /** @deprecated Use Magazine::slug() for source URL handling. */
     public static function slug(string $url): string
     {
-        if (preg_match('#^https?://magazine\.joomla\.org/issues/#i', trim($url)) !== 1) {
-            return '';
-        }
-
-        $path = (string) (parse_url(trim($url), PHP_URL_PATH) ?: '');
-        $parts = array_values(array_filter(explode('/', $path), static fn (string $p): bool => $p !== ''));
-        $slug  = (string) (end($parts) ?: '');
-
-        return strtolower((string) preg_replace('#[^a-z0-9-]#', '', $slug));
-    }
-
-    /**
-     * @return array{
-     *     title: string,
-     *     author: string,
-     *     author_url: string,
-     *     published: string,
-     *     lead_image: string,
-     *     body_empty: bool,
-     *     blocks: list<array{type: string, html?: string, src?: string, alt?: string}>
-     * }
-     */
-    private function parse(string $html): array
-    {
-        $previous = libxml_use_internal_errors(true);
-        $dom      = new DOMDocument();
-
-        $dom->loadHTML(
-            '<?xml encoding="UTF-8">' . $html,
-            LIBXML_NOERROR | LIBXML_NOWARNING | LIBXML_COMPACT
-        );
-
-        libxml_clear_errors();
-        libxml_use_internal_errors($previous);
-
-        $xpath = new DOMXPath($dom);
-
-        $article = $xpath->query(
-            "//*[contains(concat(' ', normalize-space(@class), ' '), ' com-content-article ')]"
-        )->item(0);
-
-        $result = [
-            'title'      => '',
-            'author'     => '',
-            'author_url' => '',
-            'published'  => '',
-            'lead_image' => '',
-            'body_empty' => true,
-            'blocks'     => [],
-        ];
-
-        if ($article === null) {
-            return $result;
-        }
-
-        $result['title'] = trim((string) $xpath->query('.//*[contains(@class,"page-header")]//h1', $article)->item(0)?->textContent);
-
-        $author = $xpath->query('.//*[contains(@class,"createdby")]//a', $article)->item(0);
-
-        if ($author !== null) {
-            $result['author']     = trim((string) $author->textContent);
-            $result['author_url'] = self::BASE . (string) ($author->getAttribute('href') ?: '');
-        }
-
-        $result['published'] = (string) $xpath->query('.//*[contains(@class,"published")]//time/@datetime', $article)->item(0)?->nodeValue;
-
-        $lead = $xpath->query('.//figure[contains(@class,"item-image")]//img', $article)->item(0);
-
-        if ($lead !== null) {
-            $result['lead_image'] = self::absolute((string) $lead->getAttribute('src'));
-        }
-
-        $body = $xpath->query(
-            ".//*[contains(concat(' ', normalize-space(@class), ' '), ' com-content-article__body ')]",
-            $article
-        )->item(0);
-
-        if ($body === null) {
-            return $result;
-        }
-
-        $result['body_empty'] = true;
-
-        foreach ($body->childNodes as $child) {
-            if ($child->nodeType !== XML_ELEMENT_NODE) {
-                continue;
-            }
-
-            $result['body_empty'] = false;
-            $tag = strtolower($child->nodeName);
-
-            if ($tag === 'figure') {
-                $img  = $xpath->query('.//img', $child)->item(0);
-                $src  = $img !== null ? self::absolute((string) $img->getAttribute('src')) : '';
-                $alt  = $img !== null ? trim((string) $img->getAttribute('alt')) : '';
-                $cap  = trim((string) $xpath->query('.//figcaption', $child)->item(0)?->textContent);
-
-                if ($src === '') {
-                    continue;
-                }
-
-                $result['blocks'][] = [
-                    'type' => 'img',
-                    'src'  => $src,
-                    'alt'  => $alt !== '' ? $alt : $cap,
-                ];
-
-                continue;
-            }
-
-            $result['blocks'][] = [
-                'type' => 'text',
-                'html' => (string) $dom->saveHTML($child),
-            ];
-        }
-
-        return $result;
+        return Magazine::slug($url);
     }
 
     /**
@@ -291,7 +157,7 @@ final class ArticleService
                 $alt = preg_match('#alt="([^"]*)"#i', $part, $m) === 1 ? $m[1] : '';
                 $src = preg_match('#src="([^"]*)"#i', $part, $m) === 1 ? $m[1] : '';
 
-                $out[] = ['type' => 'img', 'src' => self::absolute($src), 'alt' => $alt];
+                $out[] = ['type' => 'img', 'src' => Magazine::absoluteUrl($src), 'alt' => $alt];
 
                 continue;
             }
@@ -414,18 +280,4 @@ final class ArticleService
         return mb_substr(Persian::RLM . $translated, 0, 120, 'UTF-8');
     }
 
-    private static function absolute(string $src): string
-    {
-        $src = trim($src);
-
-        if ($src === '') {
-            return '';
-        }
-
-        if (preg_match('#^https?://#i', $src) === 1) {
-            return $src;
-        }
-
-        return self::BASE . '/' . ltrim($src, '/');
-    }
 }
