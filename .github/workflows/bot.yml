@@ -50,6 +50,9 @@ jobs:
           php tests/GeminiRetryTest.php
           php tests/OpenAiCompatibleRetryTest.php
 
+      - name: RTL direction regression test
+        run: php tests/PersianRtlTest.php
+
       - name: Gemini key check
         if: github.event_name == 'workflow_dispatch' && inputs.test_key
         env:

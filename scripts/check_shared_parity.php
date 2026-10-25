@@ -26,6 +26,7 @@ $sharedFiles = [
     'src/TextGenerator.php',
     'tests/HttpRedactionTest.php',
     'tests/SharedProviderPolicyTest.php',
+    'tests/PersianRtlTest.php',
     'scripts/check_shared_parity.php',
 ];
 
