@@ -201,8 +201,21 @@ final class Translator
         $s = str_replace('[[HR]]', Persian::separator(), $s);
         $s = $this->collapseBlankLines($s);
         $s = $this->tidyTags($s);
+        $s = $this->removeTrailingTranslationPrompt($s);
 
         return trim($s);
+    }
+
+    private function removeTrailingTranslationPrompt(string $text): string
+    {
+        $prompt = preg_quote('لطفاً متن انگلیسی مورد نظر خود را برای ترجمه ارسال کنید', '#');
+        $inlineTags = '(?:<(?:b|strong|i|em|u|s|del|ins)>\s*)*';
+        $closingTags = '(?:\s*</(?:b|strong|i|em|u|s|del|ins)>)*';
+        $pattern = '#(?:^|\n)\h*' . $inlineTags . $prompt
+            . '[.!؟…،؛]*' . $closingTags . '\h*$#u';
+        $cleaned = preg_replace($pattern, '', $text);
+
+        return is_string($cleaned) ? trim($cleaned) : trim($text);
     }
 
     private function collapseBlankLines(string $s): string
