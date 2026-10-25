@@ -20,6 +20,12 @@ final class Gemini implements TextGenerator
 
     private const RETRY_DELAY = 3;
 
+    /**
+     * Keep an unresponsive model from consuming most of the GitHub Actions
+     * job budget for every sequential article segment.
+     */
+    private const MAX_REQUEST_TIMEOUT = 30;
+
     /** @var string[] */
     private array $models;
 
@@ -55,7 +61,12 @@ final class Gemini implements TextGenerator
                 $started = microtime(true);
 
                 try {
-                    $res = $this->request($model, $system, $userText, $timeout);
+                    $res = $this->request(
+                        $model,
+                        $system,
+                        $userText,
+                        min($timeout, self::MAX_REQUEST_TIMEOUT)
+                    );
                 } catch (Throwable $e) {
                     // A transport failure (timeout, connection reset) carries no
                     // HTTP status to retry on: try the next model right away

@@ -69,4 +69,23 @@ $emptyThenValid = new Gemini(
 $assert($emptyThenValid->generate('system', 'source') === 'متن معتبر', 'an empty response must fall through to a later model');
 $assert($emptyCalls === ['empty', 'valid'], 'an empty response must not be accepted as a successful translation');
 
-fwrite(STDOUT, "OK: Gemini rate-limit and empty-output fallback tests passed.\n");
+$observedTimeouts = [];
+$timeoutProbe = new Gemini(
+    'not-a-real-key',
+    'timeout-probe',
+    static function (string $model, string $system, string $userText, int $timeout) use (&$observedTimeouts): array {
+        $observedTimeouts[] = $timeout;
+
+        return [
+            'status' => 200,
+            'json'   => ['candidates' => [['content' => ['parts' => [['text' => 'ok']]]]]],
+            'raw'    => '{}',
+        ];
+    }
+);
+
+$assert($timeoutProbe->generate('system', 'source') === 'ok', 'the timeout probe must return its fake response');
+$assert($timeoutProbe->generate('system', 'source', 12) === 'ok', 'the shorter caller timeout must remain valid');
+$assert($observedTimeouts === [30, 12], 'Gemini must cap requests at 30 seconds without increasing a shorter caller timeout');
+
+fwrite(STDOUT, "OK: Gemini rate-limit, empty-output and timeout-cap tests passed.\n");
