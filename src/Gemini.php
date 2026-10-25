@@ -7,9 +7,11 @@ final class Gemini implements TextGenerator
     private const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/';
 
     /**
-     * HTTP statuses that are worth retrying (transient overload or server side).
+     * HTTP statuses worth retrying against the same model. A 429 moves to the
+     * next configured model immediately: waiting/repeating it for every article
+     * segment can exceed the GitHub Actions job timeout.
      */
-    private const RETRYABLE_STATUS = [429, 500, 502, 503, 504];
+    private const RETRYABLE_STATUS = [500, 502, 503, 504];
 
     /**
      * How many times each model is tried before moving on to the next one.
@@ -21,16 +23,21 @@ final class Gemini implements TextGenerator
     /** @var string[] */
     private array $models;
 
+    /** @var (\Closure(string, string, string, int): array)|null */
+    private ?Closure $requester = null;
+
     /**
      * @param string $models Comma separated list of model names, tried in order.
      */
     public function __construct(
         private string $apiKey,
-        string $models = 'gemini-3.5-flash'
+        string $models = 'gemini-3.5-flash',
+        ?callable $requester = null
     ) {
         $list = array_values(array_filter(array_map('trim', explode(',', $models)), static fn (string $m): bool => $m !== ''));
 
         $this->models = $list !== [] ? $list : ['gemini-3.5-flash'];
+        $this->requester = $requester !== null ? Closure::fromCallable($requester) : null;
     }
 
     /**
@@ -95,6 +102,12 @@ final class Gemini implements TextGenerator
                     . ' in ' . self::ms($started) . 'ms'
                 );
 
+                if ($status === 429) {
+                    Log::write('gemini ' . $model . ': rate limited; moving to the next model without retry delay');
+
+                    break;
+                }
+
                 if (!in_array($status, self::RETRYABLE_STATUS, true)) {
                     break;
                 }
@@ -134,7 +147,9 @@ final class Gemini implements TextGenerator
             $text .= (string) ($part['text'] ?? '');
         }
 
-        return trim($text);
+        $text = trim($text);
+
+        return $text === '' ? null : $text;
     }
 
     /**
@@ -142,6 +157,10 @@ final class Gemini implements TextGenerator
      */
     private function request(string $model, string $system, string $userText, int $timeout): array
     {
+        if ($this->requester !== null) {
+            return ($this->requester)($model, $system, $userText, $timeout);
+        }
+
         $url = self::ENDPOINT . rawurlencode($model) . ':generateContent?key=' . rawurlencode($this->apiKey);
 
         $payload = [
