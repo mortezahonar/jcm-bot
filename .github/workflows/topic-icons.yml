@@ -1,0 +1,37 @@
+name: Manage article topic icons
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Discover the official icon ID or apply an allowed ID to saved article topics"
+        type: choice
+        options:
+          - discover
+          - apply
+        default: discover
+        required: true
+      custom_emoji_id:
+        description: "Telegram custom_emoji_id; required only in apply mode"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  manage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PR_BOT_TOKEN: ${{ secrets.PR_BOT_TOKEN }}
+      PR_CHAT_ID: ${{ secrets.PR_CHAT_ID }}
+      TOPIC_ICON_MODE: ${{ inputs.mode }}
+      TOPIC_ICON_CUSTOM_EMOJI_ID: ${{ inputs.custom_emoji_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Discover or apply article topic icon
+        run: php scripts/manage_topic_icons.php
