@@ -33,6 +33,10 @@ foreach (['bot_token', 'chat_id', 'gemini_api_key'] as $required) {
 }
 
 $telegram = new Telegram((string) $config['bot_token']);
+$topicIconPath = __DIR__ . '/data/topic_icon_custom_emoji_id.txt';
+$topicIconCustomEmojiId = is_file($topicIconPath)
+    ? trim((string) file_get_contents($topicIconPath))
+    : '';
 $gemini = new Gemini(
     (string) $config['gemini_api_key'],
     (string) $config['gemini_model'],
@@ -647,6 +651,29 @@ function buildPreview(array $job): string
     return Persian::rtl(implode("\n", $lines));
 }
 
+function applyTopicIcon(int $threadId): void
+{
+    global $telegram, $chatId, $log, $topicIconCustomEmojiId;
+
+    if ($topicIconCustomEmojiId === '') {
+        return;
+    }
+
+    try {
+        $result = $telegram->call('editForumTopic', [
+            'chat_id'              => $chatId,
+            'message_thread_id'    => $threadId,
+            'icon_custom_emoji_id' => $topicIconCustomEmojiId,
+        ]);
+        if ($result !== true) {
+            $log('topic icon could not be set; continuing with article publication');
+        }
+    } catch (Throwable) {
+        // Icon styling is best-effort and must never block article publication.
+        $log('topic icon could not be set; continuing with article publication');
+    }
+}
+
 function executeJob(array $job): array
 {
     global $telegram, $store, $chatId, $log;
@@ -655,11 +682,18 @@ function executeJob(array $job): array
     $sent = 0;
     $photos = 0;
 
+    if (!empty($job['is_update']) && $threadId !== null && $threadId > 0) {
+        applyTopicIcon($threadId);
+    }
+
     foreach ($job['actions'] as $action) {
         switch ($action['kind']) {
             case 'topic':
                 $result = $telegram->createForumTopic($chatId, (string) $action['name']);
                 $threadId = (int) $result['message_thread_id'];
+                if ($threadId > 0) {
+                    applyTopicIcon($threadId);
+                }
                 usleep(300000);
                 break;
 
