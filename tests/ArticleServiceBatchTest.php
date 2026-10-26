@@ -54,7 +54,8 @@ $html = '<article class="com-content-article">'
     . '<p>' . $first . '</p><p>' . $second . '</p><p>' . $third . '</p>'
     . '<figure><img src="/images/sample.jpg" alt=""></figure>'
     . '<p>' . $afterImage . '</p>'
-    . '</div></article>';
+    . '</div><ul class="tags list-inline"><li><a href="/tags/joomla-4">Joomla 4</a></li>'
+    . '<li><a href="/tags/explore-the-core">Explore the Core</a></li></ul></article>';
 
 $generator = new RecordingArticleGenerator();
 $translator = new Translator($generator, 'test system prompt');
@@ -76,8 +77,15 @@ $assert(
 $assert($generator->inputs[2] === $third, 'the next paragraph should start a new bounded unit');
 $assert($generator->inputs[3] === $afterImage, 'text after a figure should be translated after the image boundary');
 $assert(
-    array_column($plan['actions'], 'kind') === ['topic', 'message', 'message', 'photo', 'message'],
-    'the action plan must preserve text/image order'
+    array_column($plan['actions'], 'kind') === ['topic', 'message', 'message', 'photo', 'message', 'message'],
+    'the action plan must preserve text/image order and append one final tag message'
+);
+$lastAction = $plan['actions'][array_key_last($plan['actions'])];
+$assert(
+    $lastAction['kind'] === 'message'
+        && str_contains($lastAction['text'], '#Joomla4')
+        && str_contains($lastAction['text'], '#ExploreTheCore'),
+    'Magazine assigned tags should be formatted as hashtags at the end of the translated article'
 );
 $photos = array_values(array_filter($plan['actions'], static fn (array $action): bool => $action['kind'] === 'photo'));
 $assert(

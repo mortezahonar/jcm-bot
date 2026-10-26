@@ -39,6 +39,7 @@ final class Magazine implements ArticleSource
      *     published: string,
      *     lead_image: string,
      *     body_empty: bool,
+     *     tags: list<string>,
      *     blocks: list<array{type: string, html?: string, src?: string, alt?: string}>
      * }
      */
@@ -56,7 +57,7 @@ final class Magazine implements ArticleSource
             throw new RuntimeException('magazine.joomla.org جواب ' . $response['status'] . ' داد.');
         }
 
-        return (new JoomlaArticleParser(self::BASE))->parse($response['body']);
+        return (new JoomlaArticleParser(self::BASE, extractTags: true))->parse($response['body']);
     }
 
     /** Extract the normalized final path slug from an allowed Magazine issue URL. */

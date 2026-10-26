@@ -54,6 +54,7 @@ $html = <<<'HTML'
     <p>Before <a href="https://example.org/reference">the reference</a> <img src="/images/inline.png" alt="Screenshot"> after.</p>
     <figure><img src="../images/figure.png" alt=""><figcaption>Figure caption</figcaption></figure>
   </div>
+  <ul class="tags list-inline"><li><a href="/tags/joomla-4">Joomla 4</a></li></ul>
 </div>
 </body></html>
 HTML;
@@ -81,6 +82,7 @@ $assert($article['title'] === 'Recovering Lost Article Content', 'the Joomla pag
 $assert($article['author'] === 'Brian Teeman' && $article['author_url'] === 'https://brian.teeman.net/', 'the author metadata should produce a usable author link');
 $assert($article['published'] === '2025-02-20T09:37:21+00:00', 'the article datetime should be extracted');
 $assert($article['lead_image'] === 'https://brian.teeman.net/images/lead.webp', 'the lead image should resolve to the source domain');
+$assert($article['tags'] === [], 'the Brian Teeman adapter must not extract Magazine article tags');
 $assert($article['body_empty'] === false && count($article['blocks']) === 2, 'body text and figure should become ordered planner blocks');
 $assert(str_contains($article['blocks'][0]['html'], '/images/inline.png'), 'inline image markup should remain in the body block until planner segmentation');
 $assert(
@@ -103,6 +105,14 @@ register_shutdown_function(static function () use ($stateDir): void {
 $translator = new Translator(new BrianTeemanTestGenerator(), 'test system prompt');
 $service = new ArticleService($translator, $store, $registry);
 $plan = $service->plan($url, false);
+$planMessages = array_column(
+    array_values(array_filter($plan['actions'], static fn (array $action): bool => $action['kind'] === 'message')),
+    'text'
+);
+$assert(
+    !array_filter($planMessages, static fn (string $text): bool => str_contains($text, '#Joomla4')),
+    'Magazine hashtags must not be appended to a Brian Teeman article'
+);
 $photos = array_values(array_filter($plan['actions'], static fn (array $action): bool => $action['kind'] === 'photo'));
 $photoUrls = array_column($photos, 'url');
 $assert($plan['slug'] === $registry->topicKey($url), 'the planner should use the source-specific stable topic key');

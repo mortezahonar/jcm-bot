@@ -31,8 +31,10 @@ $html = <<<'HTML'
   <figure class="item-image"><img src="/images/lead.jpg" alt="Lead"></figure>
   <div class="com-content-article__body">
     <p>Intro with inline <img src="/images/inline.jpg" alt="Inline caption"> image.</p>
+    <p><a href="/tags/not-an-assigned-tag">Body tag link is not article metadata</a></p>
     <figure><img src="/images/chart.jpg" alt=""><figcaption>Chart caption</figcaption></figure>
   </div>
+  <ul class="tags list-inline"><li><a href="/tags/joomla-4">Joomla 4</a></li><li><a href="/tags/explore-the-core">Explore the Core</a></li></ul>
 </article>
 HTML;
 
@@ -50,10 +52,11 @@ $assert($article['author'] === 'Ada Example', 'the createdby selector should ext
 $assert($article['author_url'] === 'https://magazine.joomla.org/author/ada', 'the author link should be rooted at Magazine');
 $assert($article['published'] === '2026-10-25T10:00:00Z', 'the published datetime should be extracted');
 $assert($article['lead_image'] === 'https://magazine.joomla.org/images/lead.jpg', 'the lead image URL should be made absolute');
-$assert($article['body_empty'] === false && count($article['blocks']) === 2, 'body elements should become ordered text and image blocks');
+$assert($article['tags'] === ['Joomla 4', 'Explore the Core'], 'only assigned tags in the article-level tags list should be extracted');
+$assert($article['body_empty'] === false && count($article['blocks']) === 3, 'body elements should become ordered text and image blocks');
 $assert($article['blocks'][0]['type'] === 'text' && str_contains($article['blocks'][0]['html'], '/images/inline.jpg'), 'inline images should remain inside serialized text HTML for the planner');
 $assert(
-    $article['blocks'][1] === [
+    $article['blocks'][2] === [
         'type' => 'img',
         'src'  => 'https://magazine.joomla.org/images/chart.jpg',
         'alt'  => 'Chart caption',

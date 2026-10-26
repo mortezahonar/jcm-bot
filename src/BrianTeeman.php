@@ -73,6 +73,7 @@ final class BrianTeeman implements ArticleSource
      *     published: string,
      *     lead_image: string,
      *     body_empty: bool,
+     *     tags: list<string>,
      *     blocks: list<array{type: string, html?: string, src?: string, alt?: string}>
      * }
      */

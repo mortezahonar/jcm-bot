@@ -9,7 +9,8 @@ final class JoomlaArticleParser
 {
     public function __construct(
         private string $baseUrl,
-        private bool $authorFromMeta = false
+        private bool $authorFromMeta = false,
+        private bool $extractTags = false
     ) {
         $this->baseUrl = rtrim($this->baseUrl, '/');
     }
@@ -22,6 +23,7 @@ final class JoomlaArticleParser
      *     published: string,
      *     lead_image: string,
      *     body_empty: bool,
+     *     tags: list<string>,
      *     blocks: list<array{type: string, html?: string, src?: string, alt?: string}>
      * }
      */
@@ -50,11 +52,46 @@ final class JoomlaArticleParser
             'published'  => '',
             'lead_image' => '',
             'body_empty' => true,
+            'tags'       => [],
             'blocks'     => [],
         ];
 
         if ($article === null) {
             return $result;
+        }
+
+        if ($this->extractTags) {
+            $tagLinks = $xpath->query(
+                './ul[contains(concat(" ", normalize-space(@class), " "), " tags ")]//a[contains(@href, "/tags/")]',
+                $article
+            );
+
+            if ($tagLinks !== false) {
+                foreach ($tagLinks as $tagLink) {
+                    $href = html_entity_decode($tagLink->getAttribute('href'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                    $parts = parse_url($href);
+
+                    if (!is_array($parts)) {
+                        continue;
+                    }
+
+                    $host = strtolower((string) ($parts['host'] ?? ''));
+                    $path = (string) ($parts['path'] ?? '');
+
+                    if (
+                        ($host !== '' && $host !== strtolower((string) parse_url($this->baseUrl, PHP_URL_HOST)))
+                        || preg_match('#^/tags/[^/]+/?$#i', $path) !== 1
+                    ) {
+                        continue;
+                    }
+
+                    $label = trim((string) preg_replace('/\s+/u', ' ', $tagLink->textContent));
+
+                    if ($label !== '' && !in_array($label, $result['tags'], true)) {
+                        $result['tags'][] = $label;
+                    }
+                }
+            }
         }
 
         $result['title'] = trim((string) $xpath->query('.//*[contains(@class,"page-header")]//h1', $article)->item(0)?->textContent);

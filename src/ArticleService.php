@@ -112,6 +112,12 @@ final class ArticleService
         $this->translateBufferedText($actions, $translationBuffer, $buffer);
         $this->flush($actions, $buffer);
 
+        if ($source instanceof Magazine) {
+            foreach ($this->hashtagChunks($article['tags'] ?? []) as $hashtagChunk) {
+                $actions[] = ['kind' => 'message', 'text' => Persian::rtl($hashtagChunk)];
+            }
+        }
+
         if ($article['body_empty']) {
             $warnings[] = 'بدنه مقاله خالی است.';
         }
@@ -268,6 +274,64 @@ final class ArticleService
         $lines[] = 'منبع: <a href="' . htmlspecialchars($url, ENT_QUOTES) . '">' . htmlspecialchars($url, ENT_QUOTES) . '</a>';
 
         return Persian::rtl(implode("\n", $lines));
+    }
+
+    /** @param list<string> $tags
+     *  @return list<string>
+     */
+    private function hashtagChunks(array $tags): array
+    {
+        $hashtags = [];
+        $seen = [];
+
+        foreach ($tags as $tag) {
+            $tag = html_entity_decode(strip_tags($tag), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $tag = trim((string) preg_replace('/[^\p{L}\p{N}_]+/u', ' ', $tag));
+
+            if ($tag === '') {
+                continue;
+            }
+
+            $words = preg_split('/\s+/u', $tag, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $label = implode('', array_map(
+                static fn (string $word): string => mb_convert_case($word, MB_CASE_TITLE, 'UTF-8'),
+                $words
+            ));
+
+            if ($label === '' || mb_strlen($label, 'UTF-8') > 64) {
+                continue;
+            }
+
+            $key = mb_strtolower($label, 'UTF-8');
+
+            if (isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $hashtags[] = '#' . $label;
+        }
+
+        $chunks = [];
+        $chunk = '';
+
+        foreach ($hashtags as $hashtag) {
+            $candidate = $chunk === '' ? $hashtag : $chunk . ' ' . $hashtag;
+
+            if ($chunk !== '' && mb_strlen($candidate, 'UTF-8') > self::MAX_MESSAGE) {
+                $chunks[] = $chunk;
+                $chunk = $hashtag;
+                continue;
+            }
+
+            $chunk = $candidate;
+        }
+
+        if ($chunk !== '') {
+            $chunks[] = $chunk;
+        }
+
+        return $chunks;
     }
 
     private function topicName(string $rawTitle): string
