@@ -21,7 +21,7 @@ if (
     || $baseUrl === ''
     || $configuredModel === ''
     || $host === ''
-    || !in_array($requestedModel, ['configured', 'deepseek-v4.1-flash:free'], true)
+    || !in_array($requestedModel, ['configured', 'deepseek-v4.1-flash:free', 'mimo-v2.6-flash:free'], true)
 ) {
     fwrite(STDERR, "Fallback check: configuration incomplete (key/base URL/model).\n");
     exit(2);

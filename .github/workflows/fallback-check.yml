@@ -9,6 +9,7 @@ on:
         options:
           - configured
           - deepseek-v4.1-flash:free
+          - mimo-v2.6-flash:free
         default: configured
 
 permissions:
