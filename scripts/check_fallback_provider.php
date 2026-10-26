@@ -10,11 +10,19 @@ require __DIR__ . '/../src/OpenAiCompatible.php';
 $config = require __DIR__ . '/../config.php';
 $apiKey = trim((string) (getenv('FALLBACK_API_KEY') ?: ($config['fallback_api_key'] ?? '')));
 $baseUrl = trim((string) ($config['fallback_base_url'] ?? ''));
-$model = trim((string) ($config['fallback_model'] ?? ''));
+$configuredModel = trim((string) ($config['fallback_model'] ?? ''));
+$requestedModel = trim((string) (getenv('FALLBACK_TEST_MODEL') ?: 'configured'));
+$testModel = $requestedModel === 'configured' ? $configuredModel : $requestedModel;
 $parts = parse_url($baseUrl);
 $host = is_array($parts) ? (string) ($parts['host'] ?? '') : '';
 
-if ($apiKey === '' || $baseUrl === '' || $model === '' || $host === '') {
+if (
+    $apiKey === ''
+    || $baseUrl === ''
+    || $configuredModel === ''
+    || $host === ''
+    || !in_array($requestedModel, ['configured', 'deepseek-v4.1-flash:free'], true)
+) {
     fwrite(STDERR, "Fallback check: configuration incomplete (key/base URL/model).\n");
     exit(2);
 }
@@ -26,7 +34,7 @@ Log::$sink = static function (string $message): void {
 $generator = new OpenAiCompatible(
     $apiKey,
     $baseUrl,
-    $model,
+    $testModel,
     maxTokens: 16,
     maxAttempts: 1,
     maxRequestTimeout: 40
@@ -36,7 +44,7 @@ $started = microtime(true);
 try {
     $generator->generate('Reply with OK only.', 'Reply with OK only.', 40);
     $elapsed = (int) round((microtime(true) - $started) * 1000);
-    fwrite(STDOUT, "Fallback check: response received; generated text suppressed; elapsed={$elapsed}ms.\n");
+    fwrite(STDOUT, "Fallback check: model={$testModel}; response received; generated text suppressed; elapsed={$elapsed}ms.\n");
     exit(0);
 } catch (Throwable $e) {
     $elapsed = (int) round((microtime(true) - $started) * 1000);
@@ -58,6 +66,6 @@ try {
         $result = 'unclassified provider/transport error';
     }
 
-    fwrite(STDERR, "Fallback check failed: {$result}; elapsed={$elapsed}ms. No response body or credentials were logged.\n");
+    fwrite(STDERR, "Fallback check failed: model={$testModel}; {$result}; elapsed={$elapsed}ms. No response body or credentials were logged.\n");
     exit(1);
 }

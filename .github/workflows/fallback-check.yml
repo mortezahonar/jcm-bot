@@ -2,6 +2,14 @@ name: Fallback provider check
 
 on:
   workflow_dispatch:
+    inputs:
+      test_model:
+        description: "Test the configured fallback or the listed free DeepSeek route"
+        type: choice
+        options:
+          - configured
+          - deepseek-v4.1-flash:free
+        default: configured
 
 permissions:
   contents: read
@@ -12,6 +20,7 @@ jobs:
     timeout-minutes: 2
     env:
       FALLBACK_API_KEY: ${{ secrets.FALLBACK_API_KEY }}
+      FALLBACK_TEST_MODEL: ${{ inputs.test_model }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
