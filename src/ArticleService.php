@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * Plans translation and Telegram actions for article data fetched by Magazine.
+ * Plans translation and Telegram actions for source-neutral article data.
  */
 final class ArticleService
 {
@@ -16,7 +16,7 @@ final class ArticleService
     public function __construct(
         private Translator $translator,
         private Store $store,
-        private Magazine $magazine
+        private ArticleSourceRegistry $sources
     ) {
     }
 
@@ -34,13 +34,13 @@ final class ArticleService
     public function plan(string $url, bool $isUpdate): array
     {
         $url  = rtrim(trim($url), '/');
-        $slug = Magazine::slug($url);
+        $source = $this->sources->sourceFor($url);
 
-        if ($slug === '') {
-            throw new RuntimeException('این لینک، لینک مقالهٔ مجلهٔ جوملا نیست.');
+        if ($source === null || ($slug = $source->topicKey($url)) === '') {
+            throw new RuntimeException('این لینک به یکی از منابع پشتیبانی‌شدهٔ مقاله تعلق ندارد.');
         }
 
-        $article = $this->magazine->fetch($url);
+        $article = $source->fetch($url);
 
         if ($article['title'] === '') {
             throw new RuntimeException('عنوان مقاله در صفحه پیدا نشد.');
@@ -90,7 +90,7 @@ final class ArticleService
                 continue;
             }
 
-            foreach ($this->segments($block['html']) as $segment) {
+            foreach ($this->segments($block['html'], $source, $url) as $segment) {
                 if ($segment['type'] === 'img') {
                     $this->translateBufferedText($actions, $translationBuffer, $buffer);
                     $this->flush($actions, $buffer);
@@ -143,7 +143,7 @@ final class ArticleService
      *
      * @return list<array{type: string, html?: string, src?: string, alt?: string}>
      */
-    private function segments(string $html): array
+    private function segments(string $html, ArticleSource $source, string $articleUrl): array
     {
         $parts = preg_split('#(<img\b[^>]*>)#i', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
         $out   = [];
@@ -157,7 +157,11 @@ final class ArticleService
                 $alt = preg_match('#alt="([^"]*)"#i', $part, $m) === 1 ? $m[1] : '';
                 $src = preg_match('#src="([^"]*)"#i', $part, $m) === 1 ? $m[1] : '';
 
-                $out[] = ['type' => 'img', 'src' => Magazine::absoluteUrl($src), 'alt' => $alt];
+                $out[] = [
+                    'type' => 'img',
+                    'src'  => $source->resolveUrl($src, $articleUrl),
+                    'alt'  => $alt,
+                ];
 
                 continue;
             }

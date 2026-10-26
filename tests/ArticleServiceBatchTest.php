@@ -8,7 +8,10 @@ require __DIR__ . '/../src/TextGenerator.php';
 require __DIR__ . '/../src/Persian.php';
 require __DIR__ . '/../src/Translator.php';
 require __DIR__ . '/../src/Store.php';
+require __DIR__ . '/../src/ArticleSource.php';
+require __DIR__ . '/../src/JoomlaArticleParser.php';
 require __DIR__ . '/../src/Magazine.php';
+require __DIR__ . '/../src/ArticleSourceRegistry.php';
 require __DIR__ . '/../src/ArticleService.php';
 
 final class RecordingArticleGenerator implements TextGenerator
@@ -59,7 +62,8 @@ $fetcher = static function (string $url, int $timeout) use ($html): array {
     return ['status' => 200, 'body' => $html];
 };
 $magazine = new Magazine($fetcher);
-$service = new ArticleService($translator, $store, $magazine);
+$sources = new ArticleSourceRegistry($magazine);
+$service = new ArticleService($translator, $store, $sources);
 $plan = $service->plan('https://magazine.joomla.org/issues/2026/sample-article', false);
 
 $assert(count($generator->inputs) === 4, 'title plus three bounded article text units should require four generator calls');

@@ -12,7 +12,11 @@ require __DIR__ . '/src/OpenAiCompatible.php';
 require __DIR__ . '/src/FallbackGenerator.php';
 require __DIR__ . '/src/Translator.php';
 require __DIR__ . '/src/Store.php';
+require __DIR__ . '/src/ArticleSource.php';
+require __DIR__ . '/src/JoomlaArticleParser.php';
 require __DIR__ . '/src/Magazine.php';
+require __DIR__ . '/src/BrianTeeman.php';
+require __DIR__ . '/src/ArticleSourceRegistry.php';
 require __DIR__ . '/src/ArticleService.php';
 
 $config = require __DIR__ . '/config.php';
@@ -78,8 +82,8 @@ foreach ($store->loadTermOverrides() as $source => $target) {
     $termOverrides[$source] = $target;
 }
 $translator = new Translator($generator, $systemPrompt, $glossary, $termOverrides);
-$magazine = new Magazine();
-$service = new ArticleService($translator, $store, $magazine);
+$articleSources = new ArticleSourceRegistry(new Magazine(), new BrianTeeman());
+$service = new ArticleService($translator, $store, $articleSources);
 
 $chatId = (string) $config['chat_id'];
 $allowedUsers = array_map('strval', (array) $config['allowed_user_ids']);
@@ -222,7 +226,7 @@ function handleUpdate(array $update): void
             answerCallback($callbackId, 'لینک مقاله را بفرست');
             $store->setAwaiting((string) $userId, 'auto');
             $log('menu: asked for an article link');
-            $telegram->sendMessage($chatId, Persian::rtl('لینک مقالهٔ مجلهٔ جوملا را بفرست.'));
+            $telegram->sendMessage($chatId, Persian::rtl('لینک مقاله از مجلهٔ جوملا یا brian.teeman.net را بفرست.'));
 
             return;
         }
@@ -321,14 +325,15 @@ function handleUpdate(array $update): void
  */
 function offerTopic(string $link): void
 {
-    global $store, $telegram, $chatId, $log;
+    global $store, $telegram, $chatId, $log, $articleSources;
 
-    $slug = Magazine::slug($link);
+    $slug = $articleSources->topicKey($link);
 
     if ($slug === '') {
         $telegram->sendMessage($chatId, Persian::rtl(
-            'این لینک به مقالهٔ مجلهٔ جوملا نمی‌خورد. لینکی با این ساختار بفرست:'
+            'این لینک به مقالهٔ پشتیبانی‌شده نمی‌خورد. لینک مقاله از یکی از این منابع را بفرست:'
             . "\n" . 'https://magazine.joomla.org/issues/...'
+            . "\n" . 'https://brian.teeman.net/joomla/...'
         ));
 
         return;
@@ -345,11 +350,9 @@ function offerTopic(string $link): void
  */
 function findLink(string $text): ?string
 {
-    if (preg_match('#https?://magazine\.joomla\.org/issues/[^\s<>"\]]+#i', $text, $m) === 1) {
-        return $m[0];
-    }
+    global $articleSources;
 
-    return null;
+    return $articleSources->findLink($text);
 }
 
 /** Handle user-managed translation terminology slash commands. */
@@ -497,13 +500,14 @@ function askAbout(string $slug, bool $hasTopic): void
 function menuText(): string
 {
     return Persian::rtl(
-        'ربات ترجمهٔ مقالات مجلهٔ جوملا' . "\n\n"
+        'ربات ترجمهٔ مقالات Joomla' . "\n\n"
         . 'لینک مقاله را بفرست؛ ترجمهٔ فارسی‌اش را در تاپیک خودش می‌گذارم.' . "\n"
         . 'اصلاح واژه: /jcm_term Mattermost = مترموست' . "\n"
         . 'فهرست اصلاح‌ها: /jcm_terms' . "\n"
         . 'حذف اصلاح: /jcm_term_remove Mattermost' . "\n"
-        . 'ساختار لینک:' . "\n"
-        . 'https://magazine.joomla.org/issues/...'
+        . 'منابع پشتیبانی‌شده:' . "\n"
+        . 'https://magazine.joomla.org/issues/...' . "\n"
+        . 'https://brian.teeman.net/joomla/915-article-title'
     );
 }
 

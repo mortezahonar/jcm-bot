@@ -53,6 +53,12 @@ jobs:
       - name: RTL direction regression test
         run: php tests/PersianRtlTest.php
 
+      - name: Article source adapter tests
+        run: |
+          php tests/MagazineTest.php
+          php tests/BrianTeemanTest.php
+          php tests/ArticleServiceBatchTest.php
+
       - name: Gemini key check
         if: github.event_name == 'workflow_dispatch' && inputs.test_key
         env:
