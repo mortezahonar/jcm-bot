@@ -94,6 +94,7 @@ final class Telegram
 
         foreach ($parts as &$part) {
             if (preg_match('~^<pre\b~i', $part) === 1) {
+                $part = self::markCodeBlockLinesLtr($part);
                 continue;
             }
 
@@ -104,6 +105,22 @@ final class Telegram
         $html = implode('', $parts);
 
         return self::encode(['html' => $html . '<br>', 'is_rtl' => true]);
+    }
+
+    private static function markCodeBlockLinesLtr(string $preBlock): string
+    {
+        return preg_replace_callback('~(<code\b[^>]*>)(.*?)(</code\s*>)~is', static function (array $match): string {
+            $lines = explode("\n", $match[2]);
+
+            foreach ($lines as &$line) {
+                if (trim($line) !== '') {
+                    $line = "\u{200E}" . $line;
+                }
+            }
+            unset($line);
+
+            return $match[1] . implode("\n", $lines) . $match[3];
+        }, $preBlock) ?? $preBlock;
     }
 
     /**

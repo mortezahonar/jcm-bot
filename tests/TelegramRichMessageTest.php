@@ -28,13 +28,18 @@ $text = 'شروع' . "\n" . $codeBlock . "\n" . 'پایان';
 $method = new ReflectionMethod(Telegram::class, 'richMessage');
 $method->setAccessible(true);
 $decoded = json_decode((string) $method->invoke(null, $text), true);
-$expectedHtml = 'شروع<br>' . $codeBlock . '<br>پایان<br>';
+$ltrCodeLines = array_map(
+    static fn (string $line): string => $line === '' ? '' : "\u{200E}" . $line,
+    $codeLines
+);
+$expectedCodeBlock = '<pre><code class="language-php">' . implode("\n", $ltrCodeLines) . '</code></pre>';
+$expectedHtml = 'شروع<br>' . $expectedCodeBlock . '<br>پایان<br>';
 
 $assert(
     is_array($decoded)
         && ($decoded['html'] ?? null) === $expectedHtml
         && ($decoded['is_rtl'] ?? false) === true,
-    'normal message lines should become br while PSR-12-style code lines and indentation remain untouched inside pre'
+    'only non-empty lines inside pre/code should receive LTR marks while surrounding Persian text remains unchanged'
 );
 
-fwrite(STDOUT, "OK: Telegram rich messages preserve multiline codebox formatting.\n");
+fwrite(STDOUT, "OK: Telegram rich messages apply LTR only inside preformatted code blocks.\n");
