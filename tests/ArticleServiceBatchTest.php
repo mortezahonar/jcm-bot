@@ -52,7 +52,7 @@ $html = '<article class="com-content-article">'
     . '<div class="page-header"><h1>Sample article</h1></div>'
     . '<div class="com-content-article__body">'
     . '<p>' . $first . '</p><p>' . $second . '</p><p>' . $third . '</p>'
-    . '<figure><img src="/images/sample.jpg" alt=""></figure>'
+    . '<figure><img src="/images/sample.jpg" alt="2026 Tips"></figure>'
     . '<p>' . $afterImage . '</p>'
     . '</div><ul class="tags list-inline"><li><a href="/tags/joomla-4">Joomla 4</a></li>'
     . '<li><a href="/tags/explore-the-core">Explore the Core</a></li></ul></article>';
@@ -67,7 +67,7 @@ $sources = new ArticleSourceRegistry($magazine);
 $service = new ArticleService($translator, $store, $sources);
 $plan = $service->plan('https://magazine.joomla.org/issues/2026/sample-article', false);
 
-$assert(count($generator->inputs) === 4, 'title plus three bounded article text units should require four generator calls');
+$assert(count($generator->inputs) === 5, 'title, photo caption, and three bounded article text units should require five generator calls');
 $assert($generator->inputs[0] === 'Sample article', 'the topic title should be translated independently');
 $assert(
     str_contains($generator->inputs[1], $first) && str_contains($generator->inputs[1], $second)
@@ -75,7 +75,8 @@ $assert(
     'adjacent paragraphs should be batched up to the input threshold'
 );
 $assert($generator->inputs[2] === $third, 'the next paragraph should start a new bounded unit');
-$assert($generator->inputs[3] === $afterImage, 'text after a figure should be translated after the image boundary');
+$assert($generator->inputs[3] === '2026 Tips', 'the image alt text should be translated as its caption');
+$assert($generator->inputs[4] === $afterImage, 'text after a figure should be translated after the image boundary');
 $assert(
     array_column($plan['actions'], 'kind') === ['topic', 'message', 'message', 'photo', 'message', 'message'],
     'the action plan must preserve text/image order and append one final tag message'
@@ -91,6 +92,10 @@ $photos = array_values(array_filter($plan['actions'], static fn (array $action):
 $assert(
     count($photos) === 1 && $photos[0]['url'] === 'https://magazine.joomla.org/images/sample.jpg',
     'relative figure image URLs should stay absolute after the adapter split'
+);
+$assert(
+    $photos[0]['caption'] === Persian::RLM . '2026 Tips',
+    'numeric-leading photo captions must receive an RTL mark to request right-to-left rendering'
 );
 $assert(
     ArticleService::slug('https://magazine.joomla.org/issues/2026/sample-article') === Magazine::slug('https://magazine.joomla.org/issues/2026/sample-article'),

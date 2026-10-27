@@ -84,7 +84,7 @@ final class ArticleService
                 $actions[] = [
                     'kind'    => 'photo',
                     'url'     => $block['src'],
-                    'caption' => $caption === null ? null : Persian::rtl($caption),
+                    'caption' => $caption === null ? null : $this->rtlCaption($caption),
                 ];
 
                 continue;
@@ -99,7 +99,7 @@ final class ArticleService
                     $actions[] = [
                         'kind'    => 'photo',
                         'url'     => $segment['src'],
-                        'caption' => $caption === null ? null : Persian::rtl($caption),
+                        'caption' => $caption === null ? null : $this->rtlCaption($caption),
                     ];
 
                     continue;
@@ -141,6 +141,21 @@ final class ArticleService
     public static function slug(string $url): string
     {
         return Magazine::slug($url);
+    }
+
+    private function rtlCaption(string $caption): string
+    {
+        $caption = Persian::rtl($caption);
+        $lines = explode("\n", $caption);
+
+        foreach ($lines as &$line) {
+            if ($line !== '' && !str_starts_with($line, Persian::RLM) && preg_match('/^[0-9]/', trim($line)) === 1) {
+                $line = Persian::RLM . $line;
+            }
+        }
+        unset($line);
+
+        return implode("\n", $lines);
     }
 
     /**
