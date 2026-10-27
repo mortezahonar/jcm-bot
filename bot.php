@@ -617,7 +617,8 @@ function handleJobAction(string $action, string $jobId): void
 
     $result = executeJob($job);
     TelegramRateLimit::call(
-        static fn () => $telegram->sendMessage($chatId, Persian::rtl($result['text']), $result['thread_id'])
+        // Keep the completion notice in the main conversation, not in the article topic.
+        static fn () => $telegram->sendMessage($chatId, Persian::rtl($result['text']), null)
     );
 }
 
