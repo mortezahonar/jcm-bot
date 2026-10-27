@@ -47,6 +47,7 @@ jobs:
         run: |
           php tests/SharedProviderPolicyTest.php
           php tests/HttpRedactionTest.php
+          php tests/TelegramRichMessageTest.php
           php tests/GeminiRetryTest.php
           php tests/OpenAiCompatibleRetryTest.php
 

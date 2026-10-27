@@ -86,7 +86,22 @@ final class Telegram
      */
     private static function richMessage(string $text): string
     {
-        $html = str_replace("\n", '<br>', $text);
+        $parts = preg_split('~(<pre\b[^>]*>.*?</pre\s*>)~is', $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+
+        if (!is_array($parts)) {
+            $parts = [$text];
+        }
+
+        foreach ($parts as &$part) {
+            if (preg_match('~^<pre\b~i', $part) === 1) {
+                continue;
+            }
+
+            $part = str_replace("\n", '<br>', $part);
+        }
+        unset($part);
+
+        $html = implode('', $parts);
 
         return self::encode(['html' => $html . '<br>', 'is_rtl' => true]);
     }
