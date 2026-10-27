@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+require __DIR__ . '/../src/Persian.php';
 require __DIR__ . '/../src/Telegram.php';
 
 $assert = static function (bool $condition, string $message): void {
@@ -24,22 +25,23 @@ $codeLines = [
 ];
 $codeBlock = '<pre><code class="language-php">' . implode("\n", $codeLines) . '</code></pre>';
 $text = 'شروع' . "\n" . $codeBlock . "\n" . 'پایان';
+$rtlText = Persian::rtl($text);
 
 $method = new ReflectionMethod(Telegram::class, 'richMessage');
 $method->setAccessible(true);
-$decoded = json_decode((string) $method->invoke(null, $text), true);
+$decoded = json_decode((string) $method->invoke(null, $rtlText), true);
 $ltrCodeLines = array_map(
     static fn (string $line): string => $line === '' ? '' : "\u{200E}" . $line,
     $codeLines
 );
 $expectedCodeBlock = '<pre><code class="language-php">' . implode("\n", $ltrCodeLines) . '</code></pre>';
-$expectedHtml = 'شروع<br>' . $expectedCodeBlock . '<br>پایان<br>';
+$expectedHtml = Persian::RLM . 'شروع<br>' . $expectedCodeBlock . '<br>' . Persian::RLM . 'پایان<br>';
 
 $assert(
     is_array($decoded)
         && ($decoded['html'] ?? null) === $expectedHtml
         && ($decoded['is_rtl'] ?? false) === true,
-    'only non-empty lines inside pre/code should receive LTR marks while surrounding Persian text remains unchanged'
+    'remove RTL marks only from pre/code, add LTR marks there, and preserve surrounding Persian RTL marks'
 );
 
 fwrite(STDOUT, "OK: Telegram rich messages apply LTR only inside preformatted code blocks.\n");

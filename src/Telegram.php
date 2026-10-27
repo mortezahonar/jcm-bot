@@ -114,6 +114,7 @@ final class Telegram
 
             foreach ($lines as &$line) {
                 if (trim($line) !== '') {
+                    $line = preg_replace('/^\x{200F}+/u', '', $line) ?? $line;
                     $line = "\u{200E}" . $line;
                 }
             }
