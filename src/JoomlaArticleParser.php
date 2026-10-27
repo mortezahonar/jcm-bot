@@ -131,13 +131,61 @@ final class JoomlaArticleParser
             return $result;
         }
 
-        foreach ($body->childNodes as $child) {
+        $children = $body->childNodes;
+
+        for ($index = 0; $index < $children->length; $index++) {
+            $child = $children->item($index);
+
+            if ($child === null || $child->nodeType !== XML_ELEMENT_NODE) {
+                continue;
+            }
+
+            $tag = strtolower($child->nodeName);
+
+            if ($tag === 'p' && preg_match('/^\s*\{codecitation\b[^}]*\}\s*$/i', (string) $child->textContent) === 1) {
+                $codeLines = [];
+                $closingIndex = null;
+
+                for ($cursor = $index + 1; $cursor < $children->length; $cursor++) {
+                    $candidate = $children->item($cursor);
+
+                    if ($candidate === null || $candidate->nodeType !== XML_ELEMENT_NODE) {
+                        continue;
+                    }
+
+                    if (
+                        strtolower($candidate->nodeName) === 'p'
+                        && preg_match('/^\s*\{\/codecitation\s*\}\s*$/i', (string) $candidate->textContent) === 1
+                    ) {
+                        $closingIndex = $cursor;
+                        break;
+                    }
+
+                    $codeLines[] = trim((string) $candidate->textContent, "\r\n");
+                }
+
+                if ($closingIndex !== null) {
+                    $code = implode("\n", $codeLines);
+                    $language = $this->legacyCodeLanguage($code);
+                    $class = $language === 'php' ? ' class="language-php"' : '';
+
+                    $result['body_empty'] = false;
+                    $result['blocks'][] = [
+                        'type' => 'text',
+                        'html' => '<pre><code' . $class . '>'
+                            . htmlspecialchars($code, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+                            . '</code></pre>',
+                    ];
+                    $index = $closingIndex;
+                    continue;
+                }
+            }
+
             if ($child->nodeType !== XML_ELEMENT_NODE) {
                 continue;
             }
 
             $result['body_empty'] = false;
-            $tag = strtolower($child->nodeName);
 
             if ($tag === 'figure') {
                 $img = $xpath->query('.//img', $child)->item(0);
@@ -167,6 +215,11 @@ final class JoomlaArticleParser
         }
 
         return $result;
+    }
+
+    private function legacyCodeLanguage(string $code): string
+    {
+        return preg_match('~<\?(?:php|=)|\$[A-Za-z_][A-Za-z0-9_]*|->|::~i', $code) === 1 ? 'php' : '';
     }
 
     /** Resolve absolute, protocol-relative, root-relative and page-relative URLs. */

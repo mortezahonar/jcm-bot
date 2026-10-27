@@ -66,22 +66,23 @@ final class Translator
         $systemPrompt = $this->systemPrompt();
         $translated = $this->generator->generate($systemPrompt, $protected);
 
-        if (!$this->hasValidLinkMarkers($protected, $translated)) {
+        if (!$this->hasValidProtectedMarkers($protected, $translated)) {
             $strictPrompt = $systemPrompt . "\n\n"
-                . 'خطای ساختاری: پاسخ قبلی markerهای پیوند را حذف یا جابه‌جا کرد. این متن را از نو ترجمه کن. '
-                . 'تمام markerهای پیوند و URL را عیناً، دقیقاً یک‌بار و به همان ترتیب نگه دار؛ '
-                . 'متن لینک‌شده باید میان markerهای اصلی خودش بماند. هیچ پیوندی را به انتهای متن منتقل نکن.';
+                . 'خطای ساختاری: پاسخ قبلی markerهای پیوند یا بلوک کد را حذف یا جابه‌جا کرد. این متن را از نو ترجمه کن. '
+                . 'تمام markerهای پیوند، URL و بلوک کد را عیناً، دقیقاً یک‌بار و به همان ترتیب نگه دار؛ '
+                . 'محتوای کد را ترجمه یا ویرایش نکن. متن لینک‌شده باید میان markerهای اصلی خودش بماند. هیچ پیوندی را به انتهای متن منتقل نکن.';
             $translated = $this->generator->generate($strictPrompt, $protected);
 
-            if (!$this->hasValidLinkMarkers($protected, $translated)) {
-                throw new RuntimeException('ساختار پیوندها در ترجمه حفظ نشد؛ برای جلوگیری از جابه‌جایی ارجاع‌ها، آماده‌سازی پیش‌نویس متوقف شد. لطفاً دوباره تلاش کنید.');
+            if (!$this->hasValidProtectedMarkers($protected, $translated)) {
+                throw new RuntimeException('ساختار پیوندها یا بلوک کد در ترجمه حفظ نشد؛ برای جلوگیری از خرابی ارجاع یا کد، آماده‌سازی پیش‌نویس متوقف شد. لطفاً دوباره تلاش کنید.');
             }
         }
 
-        $restored = $this->restore($translated);
+        $restored = $this->restore($translated, $markup);
 
         if ($markup) {
             $restored = $this->postProcess($restored);
+            $restored = $this->restore($restored);
         }
 
         return trim($restored);
@@ -106,8 +107,8 @@ final class Translator
         $s = preg_replace('#<hr\s*/?>#i', "\n[[HR]]\n", $s) ?? $s;
         $s = preg_replace('#</(h2|h3|h4)>#i', "\n\n", $s) ?? $s;
         $s = preg_replace('#<(h2|h3|h4)[^>]*>#i', "\n\n", $s) ?? $s;
-        $s = preg_replace('#</p>\s*<p[^>]*>#i', "\n\n", $s) ?? $s;
-        $s = preg_replace('#<p[^>]*>#i', '', $s) ?? $s;
+        $s = preg_replace('#</p>\s*<p\b[^>]*>#i', "\n\n", $s) ?? $s;
+        $s = preg_replace('#<p\b[^>]*>#i', '', $s) ?? $s;
         $s = str_replace('</p>', "\n", $s);
         $s = preg_replace('#<li[^>]*>#i', '• ', $s) ?? $s;
         $s = str_replace('</li>', "\n", $s);
@@ -121,6 +122,8 @@ final class Translator
 
     private function protect(string $s): string
     {
+        $s = $this->protectCodeBlocks($s);
+
         // Images (kept as atoms; sent separately)
         $s = preg_replace_callback('#<img\b[^>]*>#i', function (array $m): string {
             $alt = preg_match('#alt="([^"]*)"#i', $m[0], $a) === 1 ? $a[1] : '';
@@ -178,15 +181,63 @@ final class Translator
         return $s;
     }
 
-    private function restore(string $s): string
+    private function protectCodeBlocks(string $text): string
+    {
+        $text = preg_replace_callback('#<pre\b([^>]*)>(.*?)</pre\s*>#is', function (array $match): string {
+            $attributes = $match[1];
+            $contents = $match[2];
+
+            if (preg_match('#<code\b([^>]*)>(.*?)</code\s*>#is', $contents, $codeMatch) === 1) {
+                $attributes .= ' ' . $codeMatch[1];
+                $contents = $codeMatch[2];
+            }
+
+            $contents = preg_replace('#<br\s*/?>#i', "\n", $contents) ?? $contents;
+            $code = html_entity_decode(strip_tags($contents), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+            return $this->atom('codeblock', [
+                'language' => $this->codeLanguage($attributes, $code),
+                'text'     => $code,
+            ]);
+        }, $text) ?? $text;
+
+        return preg_replace_callback('#\{codecitation\b[^}]*\}(.*?)\{/codecitation\s*\}#is', function (array $match): string {
+            $code = html_entity_decode(strip_tags($match[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $code = trim($code, "\r\n");
+
+            return $this->atom('codeblock', [
+                'language' => $this->codeLanguage('', $code),
+                'text'     => $code,
+            ]);
+        }, $text) ?? $text;
+    }
+
+    private function codeLanguage(string $attributes, string $code): string
+    {
+        if (preg_match('/\blanguage-([a-z][a-z0-9_-]*)\b/i', $attributes, $match) === 1) {
+            return strtolower($match[1]);
+        }
+
+        if (preg_match('/\b(?:data-language|lang)\s*=\s*["\']?([a-z][a-z0-9_-]*)/i', $attributes, $match) === 1) {
+            return strtolower($match[1]);
+        }
+
+        return preg_match('~<\?(?:php|=)|\$[A-Za-z_][A-Za-z0-9_]*|->|::~i', $code) === 1 ? 'php' : '';
+    }
+
+    private function restore(string $s, bool $deferCodeBlocks = false): string
     {
         $pattern = '#' . self::L . '(\d+)' . self::R . '#u';
 
-        return preg_replace_callback($pattern, function (array $m): string {
+        return preg_replace_callback($pattern, function (array $m) use ($deferCodeBlocks): string {
             $atom = $this->atoms[(int) $m[1]] ?? null;
 
             if ($atom === null) {
                 return '';
+            }
+
+            if ($deferCodeBlocks && $atom['type'] === 'codeblock') {
+                return $m[0];
             }
 
             return $this->render($atom);
@@ -209,6 +260,13 @@ final class Translator
                 return '</a>';
             case 'code':
                 return '<code>' . $this->esc((string) $data['text']) . '</code>';
+            case 'codeblock':
+                $language = (string) ($data['language'] ?? '');
+                $class = preg_match('/^[a-z][a-z0-9_-]*$/i', $language) === 1
+                    ? ' class="language-' . strtolower($language) . '"'
+                    : '';
+
+                return '<pre><code' . $class . '>' . $this->esc((string) $data['text']) . '</code></pre>';
             case 'entity':
                 return '<code>' . $this->esc((string) $data['text']) . '</code>';
             case 'term':
@@ -376,9 +434,9 @@ final class Translator
         return implode('', $parts);
     }
 
-    private function hasValidLinkMarkers(string $protected, string $translated): bool
+    private function hasValidProtectedMarkers(string $protected, string $translated): bool
     {
-        if ($this->linkSensitiveMarkerSequence($protected) !== $this->linkSensitiveMarkerSequence($translated)) {
+        if ($this->protectedMarkerSequence($protected) !== $this->protectedMarkerSequence($translated)) {
             return false;
         }
 
@@ -442,7 +500,7 @@ final class Translator
     }
 
     /** @return list<int> */
-    private function linkSensitiveMarkerSequence(string $text): array
+    private function protectedMarkerSequence(string $text): array
     {
         $count = preg_match_all('#' . self::L . '(\d+)' . self::R . '#u', $text, $matches);
 
@@ -456,7 +514,7 @@ final class Translator
             $atomId = (int) $rawId;
             $type = $this->atoms[$atomId]['type'] ?? null;
 
-            if (in_array($type, ['linkopen', 'linkclose', 'url'], true)) {
+            if (in_array($type, ['linkopen', 'linkclose', 'url', 'codeblock'], true)) {
                 $sequence[] = $atomId;
             }
         }

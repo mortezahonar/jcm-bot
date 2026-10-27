@@ -64,6 +64,29 @@ $assert(
     'figure images should use figcaption when alt text is empty'
 );
 
+$legacyCodeHtml = <<<'HTML'
+<article class="com-content-article">
+  <div class="com-content-article__body">
+    <p>Before the example.</p>
+    <p>{codecitation}</p>
+    <p>&lt;?php</p>
+    <p>$menu = JFactory::getApplication();</p>
+    <p>{/codecitation}</p>
+    <p>After the example.</p>
+  </div>
+</article>
+HTML;
+$legacyCodeArticle = (new JoomlaArticleParser('https://magazine.joomla.org'))
+    ->parse($legacyCodeHtml);
+$assert(
+    count($legacyCodeArticle['blocks']) === 3
+        && str_contains(
+            $legacyCodeArticle['blocks'][1]['html'],
+            '<pre><code class="language-php">&lt;?php' . "\n" . '$menu = JFactory::getApplication();</code></pre>'
+        ),
+    'legacy codecitation paragraphs should be regrouped as a single PHP codebox before translation batching'
+);
+
 try {
     (new Magazine(static fn (string $url, int $timeout): array => ['status' => 503, 'body' => '']))
         ->fetch('https://magazine.joomla.org/issues/2026/sample-article');
