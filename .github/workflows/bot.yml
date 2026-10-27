@@ -53,6 +53,9 @@ jobs:
       - name: RTL direction regression test
         run: php tests/PersianRtlTest.php
 
+      - name: Telegram publication retry regression test
+        run: php tests/TelegramRateLimitTest.php
+
       - name: Article source adapter tests
         run: |
           php tests/MagazineTest.php

@@ -6,6 +6,7 @@ require __DIR__ . '/src/Http.php';
 require __DIR__ . '/src/Log.php';
 require __DIR__ . '/src/Persian.php';
 require __DIR__ . '/src/Telegram.php';
+require __DIR__ . '/src/TelegramRateLimit.php';
 require __DIR__ . '/src/TextGenerator.php';
 require __DIR__ . '/src/Gemini.php';
 require __DIR__ . '/src/OpenAiCompatible.php';
@@ -615,7 +616,9 @@ function handleJobAction(string $action, string $jobId): void
     $store->deletePending($jobId);
 
     $result = executeJob($job);
-    $telegram->sendMessage($chatId, Persian::rtl($result['text']), $result['thread_id']);
+    TelegramRateLimit::call(
+        static fn () => $telegram->sendMessage($chatId, Persian::rtl($result['text']), $result['thread_id'])
+    );
 }
 
 function buildPreview(array $job): string
@@ -689,7 +692,9 @@ function executeJob(array $job): array
     foreach ($job['actions'] as $action) {
         switch ($action['kind']) {
             case 'topic':
-                $result = $telegram->createForumTopic($chatId, (string) $action['name']);
+                $result = TelegramRateLimit::call(
+                    static fn () => $telegram->createForumTopic($chatId, (string) $action['name'])
+                );
                 $threadId = (int) $result['message_thread_id'];
                 if ($threadId > 0) {
                     applyTopicIcon($threadId);
@@ -698,15 +703,26 @@ function executeJob(array $job): array
                 break;
 
             case 'message':
-                $telegram->sendMessage($chatId, (string) $action['text'], $threadId);
+                TelegramRateLimit::call(
+                    static fn () => $telegram->sendMessage($chatId, (string) $action['text'], $threadId)
+                );
                 $sent++;
-                usleep(400000);
+                // Stay below Telegram's 20-message/minute group limit, with
+                // room for the preview and completion notices in the same chat.
+                usleep(3_600_000);
                 break;
 
             case 'photo':
-                $telegram->sendPhoto($chatId, (string) $action['url'], $action['caption'] !== null ? (string) $action['caption'] : null, $threadId);
+                TelegramRateLimit::call(
+                    static fn () => $telegram->sendPhoto(
+                        $chatId,
+                        (string) $action['url'],
+                        $action['caption'] !== null ? (string) $action['caption'] : null,
+                        $threadId
+                    )
+                );
                 $photos++;
-                usleep(400000);
+                usleep(3_600_000);
                 break;
         }
     }
