@@ -57,6 +57,12 @@ jobs:
       - name: Telegram publication retry regression test
         run: php tests/TelegramRateLimitTest.php
 
+      - name: Photo delivery and publication resume regression tests
+        run: |
+          php tests/HttpImageDownloadTest.php
+          php tests/TelegramPhotoUploadTest.php
+          php tests/ArticlePublisherResumeTest.php
+
       - name: Article source adapter tests
         run: |
           php tests/MagazineTest.php

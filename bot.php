@@ -19,6 +19,7 @@ require __DIR__ . '/src/Magazine.php';
 require __DIR__ . '/src/BrianTeeman.php';
 require __DIR__ . '/src/ArticleSourceRegistry.php';
 require __DIR__ . '/src/ArticleService.php';
+require __DIR__ . '/src/ArticlePublisher.php';
 
 $config = require __DIR__ . '/config.php';
 
@@ -596,7 +597,7 @@ function answerCallback(string $callbackId, string $text): void
 
 function handleJobAction(string $action, string $jobId): void
 {
-    global $telegram, $store, $chatId;
+    global $telegram, $store, $chatId, $log;
 
     $job = $store->loadPending($jobId);
 
@@ -613,13 +614,41 @@ function handleJobAction(string $action, string $jobId): void
         return;
     }
 
+    try {
+        $result = executeJob($jobId, $job);
+    } catch (Throwable $e) {
+        $pending = $store->loadPending($jobId);
+        $nextAction = (int) ($pending['next_action_index'] ?? 0);
+        $log('publication paused at action=' . $nextAction . ' error=' . get_class($e));
+
+        try {
+            TelegramRateLimit::call(
+                static fn () => $telegram->sendMessage(
+                    $chatId,
+                    Persian::rtl(
+                        'انتشار کامل نشد؛ پیش‌نویس و پیشرفت حفظ شده است. '
+                        . 'پس از رفع خطا، دکمهٔ تأیید و ارسال را دوباره بزن تا از مورد ناموفق ادامه دهد.'
+                    ),
+                    null
+                )
+            );
+        } catch (Throwable $noticeError) {
+            $log('publication failure notice failed: ' . get_class($noticeError));
+        }
+
+        return;
+    }
+
     $store->deletePending($jobId);
 
-    $result = executeJob($job);
-    TelegramRateLimit::call(
-        // Keep the completion notice in the main conversation, not in the article topic.
-        static fn () => $telegram->sendMessage($chatId, Persian::rtl($result['text']), null)
-    );
+    try {
+        TelegramRateLimit::call(
+            // Keep the completion notice in the main conversation, not in the article topic.
+            static fn () => $telegram->sendMessage($chatId, Persian::rtl($result['text']), null)
+        );
+    } catch (Throwable $noticeError) {
+        $log('publication completed but completion notice failed: ' . get_class($noticeError));
+    }
 }
 
 function buildPreview(array $job): string
@@ -678,69 +707,48 @@ function applyTopicIcon(int $threadId): void
     }
 }
 
-function executeJob(array $job): array
+function executeJob(string $jobId, array $job): array
 {
     global $telegram, $store, $chatId, $log;
 
-    $threadId = isset($job['thread_id']) && $job['thread_id'] !== null ? (int) $job['thread_id'] : null;
-    $sent = 0;
-    $photos = 0;
+    $publisher = new ArticlePublisher(
+        $store,
+        static fn (string $name): array => TelegramRateLimit::call(
+            static fn () => $telegram->createForumTopic($chatId, $name)
+        ),
+        static fn (string $text, ?int $threadId): mixed => TelegramRateLimit::call(
+            static fn () => $telegram->sendMessage($chatId, $text, $threadId)
+        ),
+        static function (array $action, ?int $threadId) use ($telegram, $chatId): void {
+            $image = Http::downloadImage((string) ($action['url'] ?? ''));
 
-    if (!empty($job['is_update']) && $threadId !== null && $threadId > 0) {
-        applyTopicIcon($threadId);
-    }
-
-    foreach ($job['actions'] as $action) {
-        switch ($action['kind']) {
-            case 'topic':
-                $result = TelegramRateLimit::call(
-                    static fn () => $telegram->createForumTopic($chatId, (string) $action['name'])
-                );
-                $threadId = (int) $result['message_thread_id'];
-                if ($threadId > 0) {
-                    applyTopicIcon($threadId);
-                }
-                usleep(300000);
-                break;
-
-            case 'message':
+            try {
                 TelegramRateLimit::call(
-                    static fn () => $telegram->sendMessage($chatId, (string) $action['text'], $threadId)
-                );
-                $sent++;
-                // Stay below Telegram's 20-message/minute group limit, with
-                // room for the preview and completion notices in the same chat.
-                usleep(3_600_000);
-                break;
-
-            case 'photo':
-                TelegramRateLimit::call(
-                    static fn () => $telegram->sendPhoto(
+                    static fn () => $telegram->sendPhotoFile(
                         $chatId,
-                        (string) $action['url'],
-                        $action['caption'] !== null ? (string) $action['caption'] : null,
+                        $image['path'],
+                        ($action['caption'] ?? null) !== null ? (string) $action['caption'] : null,
                         $threadId
                     )
                 );
-                $photos++;
-                usleep(3_600_000);
-                break;
+            } finally {
+                if (is_file($image['path'])) {
+                    unlink($image['path']);
+                }
+            }
+        },
+        static function (int $threadId): void {
+            applyTopicIcon($threadId);
+        },
+        static function (int $microseconds): void {
+            if ($microseconds > 0) {
+                usleep($microseconds);
+            }
+        },
+        static function (string $message) use ($log): void {
+            $log($message);
         }
-    }
+    );
 
-    if ($job['is_update']) {
-        $log('update published for slug=' . $job['slug']);
-    } else {
-        $store->saveTopic((string) $job['slug'], [
-            'thread_id'  => $threadId,
-            'topic'      => (string) $job['topic_name'],
-            'url'        => (string) $job['url'],
-            'created_at' => gmdate('Y-m-d\TH:i:s\Z'),
-        ]);
-    }
-
-    return [
-        'thread_id' => $threadId,
-        'text'      => 'انجام شد. پیام: ' . $sent . ' — عکس: ' . $photos,
-    ];
+    return $publisher->publish($jobId, $job);
 }

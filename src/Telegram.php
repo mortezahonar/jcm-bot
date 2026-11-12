@@ -189,6 +189,40 @@ final class Telegram
     }
 
     /**
+     * Upload a local image as a Telegram photo, not as a document.
+     *
+     * @return array<string, mixed>
+     */
+    public function sendPhotoFile(
+        string $chatId,
+        string $photoPath,
+        ?string $caption = null,
+        ?int $threadId = null
+    ): array {
+        $image = Http::inspectImage($photoPath);
+
+        if (!class_exists(CURLFile::class)) {
+            throw new RuntimeException('Multipart photo upload is unavailable.');
+        }
+
+        $params = [
+            'chat_id' => $chatId,
+            'photo'   => new CURLFile($photoPath, $image['mime'], 'photo.' . $image['extension']),
+        ];
+
+        if ($caption !== null && $caption !== '') {
+            $params['caption'] = $caption;
+            $params['parse_mode'] = 'HTML';
+        }
+
+        if ($threadId !== null) {
+            $params['message_thread_id'] = $threadId;
+        }
+
+        return $this->callText('sendPhoto', $params, 120);
+    }
+
+    /**
      * @param array<string, mixed>|null $keyboard
      */
     public function editMessageText(string $chatId, int $messageId, string $text, ?array $keyboard = null): array|bool
