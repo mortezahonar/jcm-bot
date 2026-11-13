@@ -61,6 +61,8 @@ final class ArticleService
         $topicName = $this->topicName($article['title']);
         $actions   = [];
         $warnings  = [];
+        /** @var array<string, array{link_count: int, embed_action_index?: int}> $seenVideos */
+        $seenVideos = [];
 
         if (!$isUpdate) {
             $actions[] = ['kind' => 'topic', 'name' => $topicName];
@@ -91,6 +93,48 @@ final class ArticleService
             }
 
             foreach ($this->segments($block['html'], $source, $url) as $segment) {
+                if ($segment['type'] === 'video') {
+                    $videoId = $segment['id'];
+                    $seenVideos[$videoId] ??= ['link_count' => 0];
+                    $messageText = Persian::rtl(
+                        'تماشای ویدئو:' . "\n" . str_replace('&', '&amp;', $segment['url'])
+                    );
+
+                    if (
+                        $segment['source'] === 'link'
+                        && isset($seenVideos[$videoId]['embed_action_index'])
+                        && $seenVideos[$videoId]['link_count'] === 0
+                    ) {
+                        $actions[$seenVideos[$videoId]['embed_action_index']]['text'] = $messageText;
+                        $seenVideos[$videoId]['link_count'] = 1;
+
+                        continue;
+                    }
+
+                    if (
+                        $segment['source'] === 'embed'
+                        && ($seenVideos[$videoId]['link_count'] > 0
+                            || isset($seenVideos[$videoId]['embed_action_index']))
+                    ) {
+                        continue;
+                    }
+
+                    $this->translateBufferedText($actions, $translationBuffer, $buffer);
+                    $this->flush($actions, $buffer);
+                    $actions[] = [
+                        'kind' => 'message',
+                        'text' => $messageText,
+                    ];
+
+                    if ($segment['source'] === 'link') {
+                        $seenVideos[$videoId]['link_count']++;
+                    } else {
+                        $seenVideos[$videoId]['embed_action_index'] = array_key_last($actions);
+                    }
+
+                    continue;
+                }
+
                 if ($segment['type'] === 'img') {
                     $this->translateBufferedText($actions, $translationBuffer, $buffer);
                     $this->flush($actions, $buffer);
@@ -159,14 +203,19 @@ final class ArticleService
     }
 
     /**
-     * Split a block's HTML on inline images, the same way comment bodies are
-     * split in the PR bot.
+     * Split a block's HTML on inline images and supported YouTube links/embeds
+     * while preserving their order relative to article text.
      *
-     * @return list<array{type: string, html?: string, src?: string, alt?: string}>
+     * @return list<array{type: string, html?: string, src?: string, alt?: string, url?: string, id?: string, source?: string}>
      */
     private function segments(string $html, ArticleSource $source, string $articleUrl): array
     {
-        $parts = preg_split('#(<img\b[^>]*>)#i', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $parts = preg_split(
+            '#(<img\b[^>]*>|<iframe\b[^>]*>.*?</iframe\s*>|<a\b[^>]*>.*?</a\s*>)#is',
+            $html,
+            -1,
+            PREG_SPLIT_DELIM_CAPTURE
+        );
         $out   = [];
 
         foreach ($parts as $part) {
@@ -187,10 +236,131 @@ final class ArticleService
                 continue;
             }
 
+            if (preg_match('#^<(?:iframe|a)\b#i', $part) === 1) {
+                $isEmbed = preg_match('#^<iframe\b#i', $part) === 1;
+                $attribute = $isEmbed ? 'src' : 'href';
+                $video = $this->youtubeVideo($this->htmlAttribute($part, $attribute));
+
+                if ($video !== null) {
+                    if (!$isEmbed) {
+                        $out[] = ['type' => 'text', 'html' => $part];
+                    }
+
+                    $out[] = [
+                        'type'   => 'video',
+                        'id'     => $video['id'],
+                        'url'    => $video['url'],
+                        'source' => $isEmbed ? 'embed' : 'link',
+                    ];
+                    continue;
+                }
+            }
+
             $out[] = ['type' => 'text', 'html' => $part];
         }
 
         return $out;
+    }
+
+    private function htmlAttribute(string $html, string $attribute): string
+    {
+        $pattern = "~\\b" . preg_quote($attribute, '~')
+            . "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))~i";
+
+        if (preg_match($pattern, $html, $matches) !== 1) {
+            return '';
+        }
+
+        foreach ([1, 2, 3] as $group) {
+            if (isset($matches[$group]) && $matches[$group] !== '') {
+                return html_entity_decode($matches[$group], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * @return array{id: string, url: string}|null
+     */
+    private function youtubeVideo(string $url): ?array
+    {
+        $url = trim($url);
+
+        if (str_starts_with($url, '//')) {
+            $url = 'https:' . $url;
+        }
+
+        if ($url === '' || preg_match('/[\x00-\x20]/', $url) === 1) {
+            return null;
+        }
+
+        $parts = parse_url($url);
+
+        if (!is_array($parts)) {
+            return null;
+        }
+
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        $host = strtolower((string) ($parts['host'] ?? ''));
+        $path = (string) ($parts['path'] ?? '');
+        $port = $parts['port'] ?? 443;
+
+        if (
+            $scheme !== 'https'
+            || (int) $port !== 443
+            || isset($parts['user'])
+            || isset($parts['pass'])
+        ) {
+            return null;
+        }
+
+        $youtubeHosts = [
+            'youtube.com',
+            'www.youtube.com',
+            'm.youtube.com',
+            'youtube-nocookie.com',
+            'www.youtube-nocookie.com',
+        ];
+        $isYoutubeHost = in_array($host, $youtubeHosts, true);
+        $videoId = '';
+        $preserveUrl = false;
+        $query = [];
+
+        if (
+            $isYoutubeHost
+            && preg_match('#^/embed/([A-Za-z0-9_-]{11})/?$#', $path, $match) === 1
+        ) {
+            $videoId = $match[1];
+            parse_str((string) ($parts['query'] ?? ''), $query);
+        } elseif ($isYoutubeHost && $path === '/watch') {
+            parse_str((string) ($parts['query'] ?? ''), $query);
+            $videoId = is_string($query['v'] ?? null) ? $query['v'] : '';
+            $preserveUrl = true;
+        } elseif (
+            $host === 'youtu.be'
+            && preg_match('#^/([A-Za-z0-9_-]{11})/?$#', $path, $match) === 1
+        ) {
+            $videoId = $match[1];
+            $preserveUrl = true;
+        }
+
+        if (preg_match('#^[A-Za-z0-9_-]{11}$#', $videoId) !== 1) {
+            return null;
+        }
+
+        if ($preserveUrl) {
+            return ['id' => $videoId, 'url' => $url];
+        }
+
+        $watchUrl = 'https://www.youtube.com/watch?v=' . $videoId;
+        $start = $query['start'] ?? null;
+
+        if (is_string($start) && preg_match('/^\d+$/', $start) === 1) {
+            $watchUrl .= '&t=' . $start . 's';
+        }
+
+        return ['id' => $videoId, 'url' => $watchUrl];
     }
 
     /**

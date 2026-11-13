@@ -44,4 +44,17 @@ $assert(
     'remove RTL marks only from pre/code, add LTR marks there, and preserve surrounding Persian RTL marks'
 );
 
-fwrite(STDOUT, "OK: Telegram rich messages apply LTR only inside preformatted code blocks.\n");
+$videoUrl = 'https://www.youtube.com/watch?v=Qtl1EcQywWY&t=42s';
+$encodedVideoUrl = htmlspecialchars($videoUrl, ENT_QUOTES | ENT_HTML5);
+$videoRich = json_decode((string) $method->invoke(
+    null,
+    Persian::rtl('تماشای ویدئو:' . "\n" . $encodedVideoUrl)
+), true);
+$assert(
+    is_array($videoRich)
+        && ($videoRich['html'] ?? null) === Persian::RLM . 'تماشای ویدئو:<br>' . $encodedVideoUrl . '<br>'
+        && ($videoRich['is_rtl'] ?? false) === true,
+    'keep the YouTube URL as a plain rich-message link for Telegram link-preview generation'
+);
+
+fwrite(STDOUT, "OK: Telegram rich-message RTL, code and link tests passed.\n");
