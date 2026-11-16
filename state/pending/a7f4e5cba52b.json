@@ -1,0 +1,53 @@
+{
+    "url": "https://magazine.joomla.org/issues/2026/august-2026/css-shorts-light-dark",
+    "slug": "css-shorts-light-dark",
+    "is_update": false,
+    "topic_name": "‏نکات کوتاه CSS: light-dark()",
+    "thread_id": null,
+    "actions": [
+        {
+            "kind": "topic",
+            "name": "‏نکات کوتاه CSS: light-dark()"
+        },
+        {
+            "kind": "message",
+            "text": "‏نویسنده: <a href=\"https://magazine.joomla.org/authors/viviana-menzel\">Viviana Menzel</a>\n‏تاریخ انتشار: ۲۹ مرداد ۱۴۰۵ — ساعت ۱۰:۳۰\n‏منبع: <a href=\"https://magazine.joomla.org/issues/2026/august-2026/css-shorts-light-dark\">https://magazine.joomla.org/issues/2026/august-2026/css-shorts-light-dark</a>"
+        },
+        {
+            "kind": "photo",
+            "url": "https://magazine.joomla.org/images/2026/August/1359-JCM-August-css-shorts-1359.jpg",
+            "caption": null
+        },
+        {
+            "kind": "message",
+            "text": "‏آیا می‌خواهید با CSS حالت تاریک (Dark Mode) را راه‌اندازی کنید؟ این هم روش آن! تابع CSS به نام light-dark() از مه ۲۰۲۴ به استاندارد پایه (Baseline) تبدیل شده است (در آخرین نسخه‌های مرورگرها کار می‌کند) و به شما اجازه می‌دهد به‌راحتی یک حالت تاریک برای وب‌سایت خود ایجاد کنید.\n\n‏تابع light-dark() چیست؟\n\n‏تابع light-dark() دو رنگ را می‌پذیرد و بسته به طرح رنگی (Color Scheme) تعریف‌شده، یک رنگ را برمی‌گرداند. به‌جای استفاده از ویژگی رسانه‌ای prefers-color-scheme، می‌توانید از ویژگی color-scheme استفاده کنید. این رویکرد به شما امکان می‌دهد استایل‌هایی را تعریف کنید که به‌طور خودکار بر اساس ترجیح طرح رنگی کاربر تنظیم می‌شوند.\n\n‏چگونه با CSS حالت تاریک را راه‌اندازی کنیم؟\n\n‏گام ۱: تعریف طرح رنگی (Color Scheme)\n\n‏با تنظیم ویژگی color-scheme روی عنصر ریشه (root) شروع کنید. این کار به مرورگر اطلاع می‌دهد که سایت شما از هر دو حالت روشن و تاریک پشتیبانی می‌کند.\n\n<pre><code class=\"language-css\">:root {\n‏    color-scheme: light dark;\n‏}</code></pre>\n\n‏گام ۲: استفاده از تابع light-dark()\n\n‏با استفاده از light-dark() می‌توانید رنگ‌هایی را برای حالت‌های مختلف تنظیم کنید. این تابع دو مقدار رنگ می‌گیرد: اولی برای حالت روشن و دومی برای حالت تاریک.\n\n<pre><code class=\"language-css\">body {\n‏    background-color: light-dark(#ffffff, #000000); \n‏    color: light-dark(#000000, #ffffff); \n‏}</code></pre>\n\n‏تصاویر\n\n‏تابع light-dark() با تصاویر نیز کار می‌کند: می‌توانید دو تصویر متفاوت برای حالت‌های رنگی مختلف تعریف کنید.\n\n<pre><code class=\"language-css\">.background {\n‏    background-image: light-dark(url(&quot;light-image.jpg&quot;), url(&quot;dark-image.jpg&quot;));\n‏} </code></pre>\n\n‏گرادینت‌ها\n\n‏شما می‌توانید گرادینت‌های متفاوتی برای حالت‌های رنگی تعریف کنید.\n\n<pre><code class=\"language-css\">:root {\n‏  --light-gradient: linear-gradient(135deg, var(--color1) 20%, var(--color2));\n‏  --dark-gradient: linear-gradient(45deg, var(--color3) 30%, var(--color4));\n‏}\n‏section {\n‏    background-image: light-dark(var(--light-gradient), var(--dark-gradient));\n‏}</code></pre>\n\n‏مثال\n\n‏یک مثال کوچک از نحوه استفاده از light-dark() در یک وب‌سایت و اینکه هنگام تغییر طرح رنگی در سیستم یا مرورگر شما چگونه به نظر می‌رسد.\n\n‏CSS\n\n<pre><code class=\"language-css\">:root {\n‏    color-scheme: light dark;\n‏    --primary: light-dark(#b2d6ca, #024b40);\n‏    --accent: light-dark(#fd8b8b, #5d353e);\n‏    --bg: light-dark(#F9FAFB, #121212);\n‏    --text: light-dark(#212121, #EAEAEA);\n‏    --gradient: linear-gradient(135deg, var(--primary) 30%, var(--accent));\n‏}\n‏body {\n‏    font-family: Verdana, Geneva, Tahoma, sans-serif;\n‏    background-color: var(--bg);\n‏    color: var(--text);\n‏}\n‏.primary {\n‏    background-color: var(--primary);\n‏}\n‏.accent {\n‏    background-color: var(--accent);\n‏}\n‏.gradient {\n‏    background-image: var(--gradient);\n‏}\n‏section {\n‏    padding: 3rem 2rem;\n‏}\n‏.card {\n‏    padding: 1rem;\n‏    border-radius: 16px;\n‏}\n‏.flex {\n‏    display: flex;\n‏    gap: 2rem;\n‏}\n‏.center {\n‏    text-align: center;\n‏}</code></pre>\n\n‏HTML"
+        },
+        {
+            "kind": "message",
+            "text": "<pre><code class=\"language-markup\">&lt;body&gt;\n‏    &lt;main&gt;\n‏        &lt;section class=&quot;center&quot;&gt;\n‏            &lt;h1&gt;CSS Example&lt;/h1&gt;\n‏            &lt;p&gt;A light-dark() color scheme&lt;/p&gt;\n‏        &lt;/section&gt;\n‏        &lt;section class=&quot;flex&quot;&gt;\n‏            &lt;div class=&quot;card primary&quot;&gt;\n‏                &lt;h2&gt;Primary card&lt;/h2&gt;\n‏                &lt;p&gt;Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet.&lt;/p&gt;\n‏            &lt;/div&gt;\n‏            &lt;div class=&quot;card accent&quot;&gt;\n‏                &lt;h2&gt;Accent card&lt;/h2&gt;\n‏                &lt;p&gt;Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet.&lt;/p&gt;\n‏            &lt;/div&gt;\n‏            &lt;div class=&quot;card gradient&quot;&gt;\n‏                &lt;h2&gt;Gradient card&lt;/h2&gt;\n‏                &lt;p&gt;Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet.&lt;/p&gt;\n‏            &lt;/div&gt;\n‏        &lt;/section&gt;\n‏    &lt;/main&gt;\n‏&lt;/body&gt;</code></pre>\n\n‏نتیجه در مرورگر با استفاده از حالت روشن (light mode):"
+        },
+        {
+            "kind": "photo",
+            "url": "https://magazine.joomla.org/images/users/drmenzelit/light-dark/light.jpg",
+            "caption": "‏تصویر اسکرین‌شات از یک وب‌سایت با سه کارت در رنگ‌های مختلف"
+        },
+        {
+            "kind": "message",
+            "text": "‏نتیجه در مرورگر با استفاده از حالت تیره (Dark Mode):"
+        },
+        {
+            "kind": "photo",
+            "url": "https://magazine.joomla.org/images/users/drmenzelit/light-dark/dark.jpg",
+            "caption": "‏اسکرین‌شات از یک وب‌سایت با سه کارت در رنگ‌های مختلف در حالت تاریک (Dark Mode)"
+        },
+        {
+            "kind": "message",
+            "text": "‏هر کاربر به‌صورت خودکار وب‌سایت را در حالت رنگی ترجیحی خود (تنظیمات سیستم یا مرورگر) مشاهده خواهد کرد.\n\n‏نتیجه‌گیری\n\n‏تابع light-dark() یک تابع قدرتمند است که می‌توانید از آن برای ایجاد استایل‌های رنگی استفاده کنید که به‌طور خودکار بر اساس تنظیمات سیستم یا مرورگر کاربر برای حالت روشن یا تاریک، تنظیم می‌شوند.\n\n‏برای ارائه کنترل بیشتر بر نمایش وب‌سایت، می‌توانید یک دکمه تغییر وضعیت (Toggle) برای جابه‌جایی بین حالت روشن و تاریک ایجاد کنید. روش صحیح پیاده‌سازی چنین دکمه‌ای سال‌هاست که موضوع بحث بوده است. در زیر چند منبع اضافه کرده‌ام که می‌توانید آن‌ها را بررسی کنید.\n\n‏مطالعات بیشتر:\n\n‏• \n\n<a href=\"https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Values/color_value/light-dark\">تابع CSS light-dark()</a>\n\n‏• \n\n<a href=\"https://joshcollinsworth.com/blog/accessible-toggle-buttons\">ساخت دکمه‌های تغییر وضعیت (Toggle) دسترس‌پذیر (با مثال‌هایی برای Svelte، Vue و React)</a>\n\n‏• \n\n<a href=\"https://ryanfeigenbaum.com/dark-mode/\">راهنمای کامل دکمه تغییر وضعیت حالت تاریک</a>\n\n‏• \n\n<a href=\"https://adrianroselli.com/2019/03/under-engineered-toggles.html\">دکمه‌های تغییر وضعیت (Toggle) با مهندسی ساده</a>\n\n‏• \n\n<a href=\"https://adrianroselli.com/2019/08/under-engineered-toggles-too.html\">دکمه‌های تغییر وضعیت (Toggle) با مهندسی ساده‌تر</a>\n\n‏• \n\n<a href=\"https://www.bram.us/2020/04/26/the-quest-for-the-perfect-dark-mode-using-vanilla-javascript/\">تلاش برای یافتن دکمه تغییر وضعیت حالت تاریک کامل، با استفاده از Vanilla JavaScript</a>\n\n‏• \n\n<a href=\"https://lea.verou.me/blog/2026/dark-mode-toggles/\">دکمه‌های تغییر وضعیت حالت تاریک: دو حالت کافی است</a>\n\n‏• \n\n<a href=\"https://vale.rocks/micros/20260810-0330\">طراحی تنظیمات تم تاریک/سیستمی</a>"
+        },
+        {
+            "kind": "message",
+            "text": "‏#Tutorial #Css"
+        }
+    ],
+    "warnings": []
+}
