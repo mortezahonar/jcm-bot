@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 final class Store
 {
+    // Leave room for the ".json" suffix within common 255-byte filename limits.
+    private const MAX_SLUG_LENGTH = 240;
+
     private string $topicsDir;
     private string $pendingDir;
     private string $awaitingDir;
@@ -43,6 +46,10 @@ final class Store
      */
     public function saveLink(string $slug, string $url): void
     {
+        if (!self::validSlug($slug)) {
+            throw new InvalidArgumentException('کلید مقاله معتبر نیست.');
+        }
+
         $path = $this->linksDir . '/' . $slug . '.json';
 
         $this->writeJson($path, ['url' => $url, 'at' => gmdate('c')]);
@@ -55,7 +62,7 @@ final class Store
     {
         $path = $this->linksDir . '/' . $slug . '.json';
 
-        if (!preg_match('#^[a-z0-9-]{1,80}$#', $slug) || !is_file($path)) {
+        if (!self::validSlug($slug) || !is_file($path)) {
             return null;
         }
 
@@ -86,6 +93,10 @@ final class Store
      */
     public function saveToken(string $token, string $slug): void
     {
+        if (!self::validSlug($slug)) {
+            throw new InvalidArgumentException('کلید مقاله معتبر نیست.');
+        }
+
         $this->writeJson($this->linksDir . '/' . $token . '.tok.json', [
             'slug' => $slug,
             'at'   => gmdate('c'),
@@ -120,7 +131,7 @@ final class Store
 
         $slug = (string) ($data['slug'] ?? '');
 
-        return preg_match('#^[a-z0-9-]{1,80}$#', $slug) === 1 ? $slug : null;
+        return self::validSlug($slug) ? $slug : null;
     }
 
     /**
@@ -331,6 +342,11 @@ final class Store
         }
 
         return false;
+    }
+
+    private static function validSlug(string $slug): bool
+    {
+        return preg_match('/\\A[a-z0-9-]{1,' . self::MAX_SLUG_LENGTH . '}\\z/', $slug) === 1;
     }
 
     private static function validTerm(string $source, string $target): bool

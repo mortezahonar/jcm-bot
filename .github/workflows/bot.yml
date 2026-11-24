@@ -65,6 +65,7 @@ jobs:
 
       - name: Article source adapter tests
         run: |
+          php tests/StoreSlugLengthTest.php
           php tests/MagazineTest.php
           php tests/BrianTeemanTest.php
           php tests/ArticleServiceBatchTest.php
