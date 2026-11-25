@@ -24,12 +24,25 @@ final class Translator
 
     private int $nextOpeningLink = 0;
 
+    /** @var array<string, string> Successful translations held only for this process. */
+    private array $successfulTranslations = [];
+
     public function __construct(
         private TextGenerator $generator,
         private string $systemPrompt,
         private string $glossary = '',
         private array $termOverrides = []
     ) {
+    }
+
+    public function clearTranslationCache(): void
+    {
+        $this->successfulTranslations = [];
+    }
+
+    public function hasSuccessfulTranslations(): bool
+    {
+        return $this->successfulTranslations !== [];
     }
 
     public function translateTitle(string $text): string
@@ -55,15 +68,29 @@ final class Translator
         }
 
         $this->atoms = [];
-        $this->sourceLinks = $this->extractSourceLinks($source);
+        $this->sourceLinks = [];
         $this->nextOpeningLink = 0;
+
+        $systemPrompt = $this->systemPrompt();
+        $cacheKey = hash('sha256', serialize([
+            'translator-cache-v1',
+            $markup,
+            $systemPrompt,
+            $this->termOverrides,
+            $source,
+        ]));
+
+        if (isset($this->successfulTranslations[$cacheKey])) {
+            return $this->successfulTranslations[$cacheKey];
+        }
+
+        $this->sourceLinks = $this->extractSourceLinks($source);
         $protected = $this->protect($source);
 
         if (trim($protected) === '') {
             return '';
         }
 
-        $systemPrompt = $this->systemPrompt();
         $translated = $this->generator->generate($systemPrompt, $protected);
 
         if (!$this->hasValidProtectedMarkers($protected, $translated)) {
@@ -85,7 +112,13 @@ final class Translator
             $restored = $this->restore($restored);
         }
 
-        return trim($restored);
+        $result = trim($restored);
+
+        if ($result !== '') {
+            $this->successfulTranslations[$cacheKey] = $result;
+        }
+
+        return $result;
     }
 
     private function systemPrompt(): string

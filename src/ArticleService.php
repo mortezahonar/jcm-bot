@@ -33,6 +33,24 @@ final class ArticleService
      */
     public function plan(string $url, bool $isUpdate): array
     {
+        $this->translator->clearTranslationCache();
+
+        try {
+            return $this->buildPlan($url, $isUpdate);
+        } catch (ProviderChainFailure $firstFailure) {
+            if (!$firstFailure->isTransient() || !$this->translator->hasSuccessfulTranslations()) {
+                throw $firstFailure;
+            }
+
+            Log::write('article plan: retrying once after transient provider failure; reusing completed translations');
+
+            return $this->buildPlan($url, $isUpdate);
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private function buildPlan(string $url, bool $isUpdate): array
+    {
         $url  = rtrim(trim($url), '/');
         $source = $this->sources->sourceFor($url);
 

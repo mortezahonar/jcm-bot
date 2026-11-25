@@ -69,6 +69,7 @@ jobs:
           php tests/MagazineTest.php
           php tests/BrianTeemanTest.php
           php tests/ArticleServiceBatchTest.php
+          php tests/ArticleServiceProviderRetryTest.php
           php tests/TranslationCodeBlockTest.php
 
       - name: Gemini key check

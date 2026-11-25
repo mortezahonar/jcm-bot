@@ -21,6 +21,7 @@ final class FallbackGenerator implements TextGenerator
     public function generate(string $system, string $userText, int $timeout = 60): string
     {
         $lastError = null;
+        $hasTransientFailure = false;
 
         foreach ($this->generators as $generator) {
             $name = (new ReflectionClass($generator))->getShortName();
@@ -33,9 +34,51 @@ final class FallbackGenerator implements TextGenerator
                 Log::write('generator: ' . $name . ' gave up: ' . $e->getMessage());
 
                 $lastError = $e;
+                $hasTransientFailure = $hasTransientFailure
+                    || ProviderChainFailure::isTransientProviderError($e);
             }
         }
 
-        throw $lastError ?? new RuntimeException('No text generator configured');
+        if ($lastError === null) {
+            throw new RuntimeException('No text generator configured');
+        }
+
+        throw new ProviderChainFailure(
+            $lastError->getMessage(),
+            (int) $lastError->getCode(),
+            $lastError,
+            $hasTransientFailure
+        );
+    }
+}
+
+/** All configured text providers failed for the current input. */
+final class ProviderChainFailure extends RuntimeException
+{
+    public function __construct(
+        string $message,
+        int $code,
+        Throwable $previous,
+        private bool $transient
+    ) {
+        parent::__construct($message, $code, $previous);
+    }
+
+    public function isTransient(): bool
+    {
+        return $this->transient;
+    }
+
+    public static function isTransientProviderError(Throwable $error): bool
+    {
+        if ($error instanceof self) {
+            return $error->isTransient();
+        }
+
+        $message = strtolower($error->getMessage());
+
+        return str_contains($message, 'timed out')
+            || str_contains($message, 'http request failed')
+            || preg_match('/\b(?:429|500|502|503|504)\b/', $message) === 1;
     }
 }
