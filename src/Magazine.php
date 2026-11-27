@@ -49,15 +49,40 @@ final class Magazine implements ArticleSource
             throw new RuntimeException('این لینک، لینک مقالهٔ مجلهٔ جوملا نیست.');
         }
 
-        $response = $this->fetcher !== null
+        $fetch = fn (): array => $this->fetcher !== null
             ? ($this->fetcher)($url, 90)
             : Http::get($url, 90);
+        $parser = new JoomlaArticleParser(self::BASE, extractTags: true);
 
-        if ($response['status'] !== 200) {
-            throw new RuntimeException('magazine.joomla.org جواب ' . $response['status'] . ' داد.');
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            $response = $fetch();
+
+            if ($response['status'] !== 200) {
+                throw new RuntimeException('magazine.joomla.org جواب ' . $response['status'] . ' داد.');
+            }
+
+            $article = $parser->parse($response['body']);
+
+            if ($article['title'] !== '') {
+                return $article;
+            }
+
+            if (self::isVerificationInterstitial($response['body'])) {
+                throw new RuntimeException(
+                    'وب‌سایت مجله صفحهٔ تأیید درخواست را برگرداند؛ عنوان مقاله قابل استخراج نیست.'
+                );
+            }
         }
 
-        return (new JoomlaArticleParser(self::BASE, extractTags: true))->parse($response['body']);
+        throw new RuntimeException('صفحهٔ مجله پس از یک دریافت مجدد همچنان عنوان قابل‌خواندن نداشت.');
+    }
+
+    /** Recognize a known HTTP 200 verification interstitial without exposing its body. */
+    private static function isVerificationInterstitial(string $html): bool
+    {
+        $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        return stripos($text, 'Please wait while your request is being verified') !== false;
     }
 
     /** Extract the normalized final path slug from an allowed Magazine issue URL. */

@@ -64,6 +64,58 @@ $assert(
     'figure images should use figcaption when alt text is empty'
 );
 
+$retryCalls = 0;
+$retryingMagazine = new Magazine(static function (string $url, int $timeout) use (&$retryCalls, $html): array {
+    $retryCalls++;
+
+    return [
+        'status' => 200,
+        'body' => $retryCalls === 1 ? '<html><body>Temporary non-article response</body></html>' : $html,
+    ];
+});
+$retriedArticle = $retryingMagazine->fetch('https://magazine.joomla.org/issues/2026/sample-article');
+$assert($retryCalls === 2, 'an HTTP 200 page without an article title should be retried exactly once');
+$assert($retriedArticle['title'] === 'Sample article title', 'a valid second page response should recover the article');
+
+$verificationCalls = 0;
+$verificationMagazine = new Magazine(static function (string $url, int $timeout) use (&$verificationCalls): array {
+    $verificationCalls++;
+
+    return [
+        'status' => 200,
+        'body' => '<html><body>Please wait while your request is being verified...</body></html>',
+    ];
+});
+
+try {
+    $verificationMagazine->fetch('https://magazine.joomla.org/issues/2026/sample-article');
+    $assert(false, 'a verification interstitial must not be accepted as an article');
+} catch (RuntimeException $e) {
+    $assert(
+        $e->getMessage() === 'وب‌سایت مجله صفحهٔ تأیید درخواست را برگرداند؛ عنوان مقاله قابل استخراج نیست.',
+        'a known verification interstitial should have a specific safe error'
+    );
+}
+$assert($verificationCalls === 1, 'a known verification interstitial should not be retried as an article page');
+
+$emptyTitleCalls = 0;
+$emptyTitleMagazine = new Magazine(static function (string $url, int $timeout) use (&$emptyTitleCalls): array {
+    $emptyTitleCalls++;
+
+    return ['status' => 200, 'body' => '<html><body>No Joomla article here.</body></html>'];
+});
+
+try {
+    $emptyTitleMagazine->fetch('https://magazine.joomla.org/issues/2026/sample-article');
+    $assert(false, 'a persistent non-article page must fail closed');
+} catch (RuntimeException $e) {
+    $assert(
+        $e->getMessage() === 'صفحهٔ مجله پس از یک دریافت مجدد همچنان عنوان قابل‌خواندن نداشت.',
+        'a persistent empty-title response should have a precise safe error'
+    );
+}
+$assert($emptyTitleCalls === 2, 'an unrecognized empty-title response must be retried only once');
+
 $legacyCodeHtml = <<<'HTML'
 <article class="com-content-article">
   <div class="com-content-article__body">
