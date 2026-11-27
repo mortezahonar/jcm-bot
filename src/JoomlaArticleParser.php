@@ -94,7 +94,27 @@ final class JoomlaArticleParser
             }
         }
 
-        $result['title'] = trim((string) $xpath->query('.//*[contains(@class,"page-header")]//h1', $article)->item(0)?->textContent);
+        $titleNode = $xpath->query('.//*[contains(@class,"page-header")]//h1', $article)->item(0);
+        $result['title'] = trim((string) $titleNode?->textContent);
+
+        if ($result['title'] === '') {
+            $titleNode = $xpath->query('.//h1', $article)->item(0);
+            $result['title'] = trim((string) $titleNode?->textContent);
+        }
+
+        if ($result['title'] === '') {
+            $metaTitle = $xpath->query(
+                '//meta[translate(@property,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz")="og:title"]/@content'
+            )->item(0)?->nodeValue;
+
+            if (trim((string) $metaTitle) === '') {
+                $metaTitle = $xpath->query(
+                    '//meta[translate(@name,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz")="twitter:title"]/@content'
+                )->item(0)?->nodeValue;
+            }
+
+            $result['title'] = trim((string) $metaTitle);
+        }
 
         if ($this->authorFromMeta) {
             $author = trim((string) $xpath->query(

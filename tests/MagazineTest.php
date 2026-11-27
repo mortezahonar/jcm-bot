@@ -48,6 +48,39 @@ $article = $magazine->fetch('https://magazine.joomla.org/issues/2026/sample-arti
 
 $assert($seen === ['https://magazine.joomla.org/issues/2026/sample-article', 90], 'the adapter should call its fetcher with the article URL and 90-second timeout');
 $assert($article['title'] === 'Sample article title', 'the Joomla page-header selector should extract the title');
+$alternateHeadingArticle = (new JoomlaArticleParser('https://magazine.joomla.org'))->parse(
+    '<article class="com-content-article"><h1>Standalone article heading</h1>'
+        . '<div class="com-content-article__body"><p>Body.</p></div></article>'
+);
+$assert(
+    $alternateHeadingArticle['title'] === 'Standalone article heading',
+    'a heading moved outside page-header should remain extractable inside the article container'
+);
+$metadataTitleArticle = (new JoomlaArticleParser('https://magazine.joomla.org'))->parse(
+    '<html><head><meta property="og:title" content="Article metadata title"></head>'
+        . '<body><article class="com-content-article"><div class="com-content-article__body"><p>Body.</p>'
+        . '</div></article></body></html>'
+);
+$assert(
+    $metadataTitleArticle['title'] === 'Article metadata title',
+    'article-scoped Open Graph metadata should be used when Joomla has no heading'
+);
+$twitterTitleArticle = (new JoomlaArticleParser('https://magazine.joomla.org'))->parse(
+    '<html><head><meta name="twitter:title" content="Twitter metadata title"></head>'
+        . '<body><article class="com-content-article"><div class="com-content-article__body"><p>Body.</p>'
+        . '</div></article></body></html>'
+);
+$assert(
+    $twitterTitleArticle['title'] === 'Twitter metadata title',
+    'Twitter title metadata should be used only as the last title fallback'
+);
+$verificationMetadata = (new JoomlaArticleParser('https://magazine.joomla.org'))->parse(
+    '<html><head><meta property="og:title" content="Verification page"></head><body>Please verify.</body></html>'
+);
+$assert(
+    $verificationMetadata['title'] === '',
+    'metadata without a Joomla article container must not be accepted as an article title'
+);
 $assert($article['author'] === 'Ada Example', 'the createdby selector should extract the author');
 $assert($article['author_url'] === 'https://magazine.joomla.org/author/ada', 'the author link should be rooted at Magazine');
 $assert($article['published'] === '2026-10-25T10:00:00Z', 'the published datetime should be extracted');
