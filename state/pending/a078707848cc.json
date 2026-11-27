@@ -3,7 +3,7 @@
     "slug": "hello-louise-meet-jcms-new-team-leader",
     "is_update": false,
     "topic_name": "‏سلام لوئیز! با سرپرست جدید تیم JCM آشنا شو.",
-    "thread_id": null,
+    "thread_id": 1604,
     "actions": [
         {
             "kind": "topic",
@@ -69,5 +69,6 @@
             "text": "‏#Interviews #JoomlaCommunityMagazine"
         }
     ],
-    "warnings": []
+    "warnings": [],
+    "next_action_index": 2
 }
