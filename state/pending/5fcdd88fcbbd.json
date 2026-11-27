@@ -3,7 +3,7 @@
     "slug": "custom-plugins-part-2-task-plugin",
     "is_update": false,
     "topic_name": "‏پلاگین‌های سفارشی (Custom Plugins)، بخش ۲: وظیفه پلاگین",
-    "thread_id": null,
+    "thread_id": 1564,
     "actions": [
         {
             "kind": "topic",
@@ -65,5 +65,6 @@
             "text": "‏#Developers #Development #Extensions"
         }
     ],
-    "warnings": []
+    "warnings": [],
+    "next_action_index": 2
 }
